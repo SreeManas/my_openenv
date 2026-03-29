@@ -1,0 +1,112 @@
+# OpenEnv Environment — AI Code Review & Bug Resolution
+# https://github.com/openenv-dev/openenv
+
+environment:
+  name: ai-code-review
+  display_name: "AI Code Review & Bug Resolution"
+  version: "2.1.0"
+  description: >
+    A multi-step reinforcement-learning environment that simulates a
+    real-world code review workflow. The agent must progressively analyze,
+    fix, and optimize code across multiple steps under uncertainty.
+    Features include ambiguous issue descriptions, hidden issues revealed
+    mid-episode, confidence calibration, order-dependent penalties, and
+    trade-offs between safety and efficiency.
+  category: software_engineering
+  difficulty_range: [easy, medium, hard]
+
+  api:
+    reset: "POST /reset"
+    step: "POST /step"
+    state: "GET /state"
+    tasks: "GET /tasks"
+    grader: "POST /grader"
+    baseline: "POST /baseline"
+
+# ─── Action schema ─────────────────────────────────────────────────────────
+action_space:
+  type: object
+  properties:
+    action_type:
+      type: string
+      enum: [fix_bug, optimize_code, flag_issue, leave_as_is]
+      description: "Type of code-review action."
+    explanation:
+      type: string
+      description: "Free-text rationale for the action."
+    confidence:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      default: 1.0
+      description: >
+        Agent's confidence in this action. Used for calibration:
+        overconfident wrong answers are penalized more heavily.
+
+# ─── Observation schema ───────────────────────────────────────────────────
+observation_space:
+  type: object
+  properties:
+    code_snippet:
+      type: string
+      description: "Current version of the code under review (evolves after each action)."
+    issue_type:
+      type: string
+      description: >
+        Ambiguous hint about the primary issue. NOT an exact label —
+        the agent must infer the true issue category from context.
+    context:
+      type: string
+      description: "Contextual information about the code / task."
+    task_id:
+      type: string
+    step_number:
+      type: integer
+    remaining_issues:
+      type: array
+      items:
+        type: string
+      description: "IDs of visible issues still unresolved (hidden issues not included)."
+    max_steps:
+      type: integer
+
+# ─── Reward ────────────────────────────────────────────────────────────────
+reward:
+  range: [-1.5, 2.0]
+  components:
+    correct_action: "+1.0 × severity × confidence_calibration"
+    sequence_bonus: "+0.5"
+    wrong_action: "-0.5 × confidence_escalation"
+    unnecessary_action: "-0.2"
+    leave_as_is_with_issues: "-0.1"
+    repeat_penalty: "-0.15"
+    order_violation: "-0.3 (configurable per task)"
+    efficiency_bonus: "up to +0.5"
+
+# ─── Grading ──────────────────────────────────────────────────────────────
+grading:
+  components:
+    completion: { weight: 0.30, description: "Fraction of issues resolved" }
+    efficiency: { weight: 0.15, description: "Steps used vs ideal" }
+    safety: { weight: 0.20, description: "Penalty for harmful actions" }
+    sequence: { weight: 0.20, description: "LCS of expected vs actual action order" }
+    calibration: { weight: 0.15, description: "Confidence-correctness alignment" }
+  range: [0.0, 1.0]
+
+# ─── Tasks ─────────────────────────────────────────────────────────────────
+tasks:
+  - id: easy_syntax_bug
+    difficulty: easy
+    issues: 2
+    max_steps: 4
+    features: [ambiguous_hints]
+  - id: medium_logic_bug
+    difficulty: medium
+    issues: 3
+    max_steps: 6
+    features: [ambiguous_hints, hidden_issue, trade_offs]
+  - id: hard_multi_issue
+    difficulty: hard
+    issues: 4
+    max_steps: 8
+    features: [ambiguous_hints, hidden_issue, order_constraints, trade_offs]
