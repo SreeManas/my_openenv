@@ -1,3 +1,11 @@
+---
+title: CodeReviewBench
+emoji: 🚀
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
 # CodeReviewBench: A Multi-Step Evaluation Environment for AI Agents in Sequential Code Analysis Under Uncertainty
 
 > **A structured evaluation framework for measuring AI agent capabilities in sequential decision-making, diagnostic reasoning, and calibrated action selection — grounded in real-world software engineering workflows.**
