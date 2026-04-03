@@ -6,7 +6,7 @@ colorTo: purple
 sdk: docker
 app_port: 7860
 ---
-# CodeReviewBench: A Multi-Step Evaluation Environment for AI Agents in Sequential Code Analysis Under Uncertainty
+# CodeReviewBench: A Multi-Step RL Evaluation Framework for Code Intelligence Agents
 
 > **A structured evaluation framework for measuring AI agent capabilities in sequential decision-making, diagnostic reasoning, and calibrated action selection — grounded in real-world software engineering workflows.**
 
@@ -16,27 +16,55 @@ app_port: 7860
 
 ---
 
+## What Makes This Unique
+
+Most AI benchmarks are single-step. CodeReviewBench is not.
+
+- **Multi-step code evolution** — the codebase changes dynamically as issues are resolved
+- **Hidden issues revealed mid-episode** — partial observability forces adaptive replanning
+- **Confidence-aware reward shaping** — calibration scoring penalizes overconfident wrong decisions
+- **Order constraints** — security-first gating with penalties for unsafe sequencing
+- **Deterministic noise injection** — ~40% of hints are perturbed to test semantic robustness
+- **Multi-agent benchmarking** — safe vs. aggressive vs. baseline strategies compared head-to-head
+- **Failure analysis engine** — explains *why* agents fail, not just *that* they failed
+- **Real-world impact modeling** — maps each unresolved bug to a concrete consequence
+
+---
+
+## Agent Performance
+
+| Agent            | Easy  | Medium | Hard  | Avg       |
+| ---------------- | ----- | ------ | ----- | --------- |
+| `safe_agent`     | 0.992 | 0.985  | 0.937 | **0.969** |
+| `baseline`       | 0.999 | 0.653  | 0.676 | 0.776     |
+| `aggressive_agent` | 1.000 | 1.000 | 0.292 | 0.764   |
+
+Key insight: **easy tasks don't differentiate agents** — hard tasks do. The aggressive agent collapses on hard tasks (0.292) due to order violations and action repetition. Only the safe agent sustains performance across all difficulty levels.
+
+---
+
 ## Abstract
 
-**CodeReviewBench** is a fully OpenEnv-compliant, deployment-ready reinforcement-learning environment that provides a structured framework for evaluating AI agents on sequential code analysis, bug resolution, and optimization tasks. Unlike single-step classification benchmarks, CodeReviewBench requires agents to operate under **partial observability**, **ambiguous feedback signals**, and **inter-dependent action constraints** — properties characteristic of real-world software engineering workflows. The environment features dynamic state evolution, hidden defect discovery, confidence-calibrated reward shaping, adaptive difficulty adjustment, deterministic noise injection, and trajectory-based grading across five evaluation dimensions.
+**CodeReviewBench** is a fully OpenEnv-compliant, deployment-ready reinforcement-learning environment that provides a structured framework for evaluating AI agents on sequential code analysis, bug resolution, and optimization tasks. Unlike single-step classification benchmarks, CodeReviewBench requires agents to operate under **partial observability**, **ambiguous feedback signals**, and **inter-dependent action constraints** — properties characteristic of real-world software engineering workflows.
+
+The environment features dynamic state evolution, hidden defect discovery, confidence-calibrated reward shaping, adaptive difficulty adjustment, deterministic noise injection, and trajectory-based grading across five evaluation dimensions.
 
 **CodeReviewBench not only evaluates what decisions an agent makes, but why those decisions succeed or fail, and what their real-world consequences would be.**
 
-A rule-based baseline agent achieves an average score of **0.776**, demonstrating that the environment is neither trivially solvable nor intractably difficult — it occupies the challenging but informative region of the evaluation spectrum where meaningful capability differences between agents can be measured.
+A rule-based baseline agent achieves an average score of **0.776** — demonstrating that the environment is neither trivially solvable nor intractably difficult.
 
 ---
 
 ## What This Environment Evaluates
 
-CodeReviewBench is designed to measure six core agent capabilities that are essential in professional knowledge work but underrepresented in existing benchmarks:
+CodeReviewBench measures six core capabilities underrepresented in existing benchmarks:
 
-- **Sequential decision-making** — agents must plan and execute multi-step action sequences where early choices constrain later options
-- **Reasoning under partial observability** — not all information is available upfront; agents must act on incomplete knowledge
-- **Handling of hidden information** — new defects are revealed mid-episode, requiring adaptive replanning rather than fixed strategies
-- **Trade-off management** — agents face genuine safety-vs-efficiency tensions with no single dominant strategy
-- **Confidence calibration** — agents must express well-calibrated certainty; overconfidence on wrong decisions is penalized more than cautious uncertainty
-- **Adaptive planning** — agents must revise their approach when the environment state changes unexpectedly
-- **Robustness to noise** — deterministic perturbations add controlled ambiguity to observations, simulating imperfect real-world signals
+- **Sequential decision-making** — early choices constrain later options
+- **Reasoning under partial observability** — agents must act on incomplete knowledge
+- **Hidden information handling** — new defects revealed mid-episode require adaptive replanning
+- **Trade-off management** — genuine safety-vs-efficiency tensions with no single dominant strategy
+- **Confidence calibration** — overconfidence on wrong decisions is penalized more than cautious uncertainty
+- **Robustness to noise** — deterministic perturbations add controlled ambiguity to observations
 
 ---
 
@@ -44,10 +72,8 @@ CodeReviewBench is designed to measure six core agent capabilities that are esse
 
 ### The Evaluation Gap
 
-Current AI agent benchmarks fall broadly into two categories: *knowledge assessments* (static question answering) and *interactive environments* (grid-worlds, Atari games, simplified simulations). Both fail to capture the characteristics of professional knowledge work:
-
 | Property | Toy Environments | Real Developer Workflows |
-|----------|-----------------|-------------------------|
+|----------|-----------------|--------------------------|
 | Decisions per episode | 1 | 5–50+ |
 | Information availability | Complete | Partial, evolving |
 | Feedback signals | Unambiguous | Noisy, contextual |
@@ -55,9 +81,9 @@ Current AI agent benchmarks fall broadly into two categories: *knowledge assessm
 | Risk management | Absent | Critical |
 | Confidence awareness | Irrelevant | Essential |
 
-A developer performing code review does not simply classify a snippet — they must *read*, *hypothesize*, *prioritize*, *act*, *observe the consequences*, and *adapt*. Errors in early steps cascade. Overconfidence leads to regressions. Ignoring security concerns in favor of quick fixes introduces systemic risk.
+A developer performing code review does not simply classify a snippet — they must *read*, *hypothesize*, *prioritize*, *act*, *observe the consequences*, and *adapt*. Errors in early steps cascade. Overconfidence leads to regressions.
 
-Existing evaluation frameworks — from fully observable grid-worlds to single-step code classification tasks — strip away precisely these dynamics. CodeReviewBench reintroduces them in a controlled, deterministic setting where agent capabilities can be measured with diagnostic precision.
+CodeReviewBench reintroduces these dynamics in a controlled, deterministic setting where agent capabilities can be measured with diagnostic precision.
 
 ### Design Objective
 
@@ -92,15 +118,13 @@ trajectory_score ← env.grade()
 
 Each episode simulates a developer reviewing a pull request:
 
-1. **Initial review** — the developer reads the code and sees an initial set of reviewer comments (observations with ambiguous hints)
-2. **Triage** — based on the hints and code context, they decide what to address first
-3. **Iterative fixes** — each fix modifies the codebase; the updated code may reveal new issues (hidden defects surfacing)
-4. **Completion** — the review ends when all issues are addressed or the review budget (max steps) is exhausted
-5. **Post-hoc evaluation** — the entire review trajectory is scored on multiple quality dimensions
+1. **Initial review** — reads the code and sees reviewer comments (ambiguous hints)
+2. **Triage** — decides what to address first based on context
+3. **Iterative fixes** — each fix modifies the codebase; may reveal hidden issues
+4. **Completion** — ends when all issues resolved or step budget exhausted
+5. **Post-hoc evaluation** — entire trajectory scored on multiple quality dimensions
 
 ### Action Space
-
-Agents select from four structured actions per step:
 
 | Action | Semantics | Typical Targets |
 |--------|-----------|-----------------|
@@ -109,22 +133,20 @@ Agents select from four structured actions per step:
 | `flag_issue` | Escalate a systemic concern | Security vulnerabilities, resource leaks |
 | `leave_as_is` | Decline to act | Used when no issues remain |
 
-Each action includes a **free-text explanation** and a **confidence score** ∈ [0, 1], which directly influences the reward received.
+Each action includes a **free-text explanation** and a **confidence score** ∈ [0, 1] that directly influences reward.
 
 ### Observation Space
-
-Each observation contains:
 
 | Field | Description |
 |-------|-------------|
 | `code_snippet` | Current version of the code (evolves dynamically) |
-| `issue_type` | An **ambiguous hint** about the primary issue — *not* a ground-truth label |
+| `issue_type` | An **ambiguous hint** — *not* a ground-truth label |
 | `context` | Task-level background information |
 | `remaining_issues` | IDs of *visible* unresolved issues (hidden issues excluded) |
 | `step_number` | Current step index |
 | `max_steps` | Episode budget |
 
-> **Key design choice**: the `issue_type` field deliberately presents *hints* rather than labels. For example, a logic error is described as *"Unexpected behavior: the function produces correct output but performs redundant comparisons"* rather than *"logic_error"*. This forces agents to reason about symptom-to-cause mappings.
+> **Key design choice**: `issue_type` presents *hints* rather than labels. A logic error appears as *"Unexpected behavior: the function produces correct output but performs redundant comparisons"* — not *"logic_error"*. Agents must reason about symptom-to-cause mappings.
 
 ---
 
@@ -132,16 +154,16 @@ Each observation contains:
 
 ### 3.1 Partial Observability
 
-Not all defects are visible at episode start. **Hidden issues** are revealed only after the agent resolves at least one visible issue — modeling the real-world phenomenon where fixing one bug frequently exposes another.
+**Hidden issues** are revealed only after the agent resolves at least one visible issue — modeling how fixing one bug frequently exposes another.
 
-- **Medium task**: a `None`-input crash is hidden until the loop-bounds bug is fixed
-- **Hard task**: a database connection resource leak surfaces only after the SQL injection is patched
+- **Medium task**: a `None`-input crash hidden until the loop-bounds bug is fixed
+- **Hard task**: a database connection resource leak surfaces only after SQL injection is patched
 
 This prevents agents from planning a complete solution upfront and forces adaptive replanning.
 
 ### 3.2 Ambiguous Observations
 
-Issue hints are deliberately vague. A rule-based agent cannot reliably map hints to actions without deeper contextual reasoning:
+Issue hints are deliberately vague:
 
 | Ground Truth | Agent Sees |
 |-------------|------------|
@@ -152,46 +174,38 @@ Issue hints are deliberately vague. A rule-based agent cannot reliably map hints
 
 ### 3.3 Sequential Action Dependencies
 
-The hard task enforces **order constraints**: fixing functional bugs before patching a security vulnerability incurs a penalty (−0.3 per violation). This reflects the principle that *unsafe code should not be executed*, and models the real-world priority of security over functionality during review.
-
-Agents that resolve issues in the expected order receive a **sequence bonus** (+0.5 per correctly ordered action), evaluated via longest common subsequence (LCS) matching against the ideal sequence.
+The hard task enforces **order constraints**: fixing functional bugs before patching a security vulnerability incurs a penalty (−0.3 per violation). Correctly ordered actions receive a **sequence bonus** (+0.5), evaluated via longest common subsequence (LCS) matching.
 
 ### 3.4 Safety–Efficiency Trade-offs
 
-Agents face genuine trade-offs:
+Agents face genuine trade-offs with no single dominant strategy:
 
-- **Flagging a security issue** is correct but delays functional fixes, potentially causing the agent to exceed the step budget
-- **Optimizing code first** may implicitly resolve a logic bug (the set-based O(n) approach subsumes the redundant-comparison fix) but forfeits explicit resolution credit
-- **Skipping minor issues** (e.g., style) preserves steps for critical bugs but reduces the completion score
-
-There is no single dominant strategy — optimal behavior depends on the task structure and remaining budget.
+- **Flagging security** is correct but delays functional fixes, risking step budget exhaustion
+- **Optimizing first** may implicitly resolve a logic bug but forfeits explicit resolution credit
+- **Skipping minor issues** preserves steps for critical bugs but reduces completion score
 
 ### 3.5 Confidence-Calibrated Rewards
 
-The `confidence` field is not decorative. It directly modulates rewards:
-
 ```
-For correct actions:   reward = base × severity × (0.5 + 0.5 × confidence)
-For incorrect actions: penalty = base × (0.5 + 0.5 × confidence)
+Correct actions:   reward = base × severity × (0.5 + 0.5 × confidence)
+Incorrect actions: penalty = base × (0.5 + 0.5 × confidence)
 ```
 
-An agent that is *correctly confident* earns more. An agent that is *incorrectly confident* loses more. An agent that expresses low confidence on uncertain decisions is penalized less for mistakes. This incentivizes well-calibrated probability estimates — a critical capability for trustworthy AI systems.
+An agent that is *correctly confident* earns more. An agent that is *incorrectly confident* loses more. This incentivizes well-calibrated probability estimates — critical for trustworthy AI systems.
 
 ### 3.6 Dynamic State Evolution
 
-After each action, the environment updates the `code_snippet` to reflect the fix that was applied. The agent observes the *changed* code in subsequent steps, requiring it to reason about a moving target. Code versions are pre-computed for all combinations of resolved issues, ensuring determinism.
+After each action, the environment updates `code_snippet` to reflect the applied fix. The agent observes *changed* code in subsequent steps, requiring reasoning about a moving target. Code versions are pre-computed for all combinations of resolved issues, ensuring full determinism.
 
 ---
 
 ## Design Philosophy
 
-The following principles guided the design of CodeReviewBench:
-
-- **Realism over simplicity** — the environment models properties of real developer workflows (ambiguity, hidden information, cascading consequences) even when this increases complexity
-- **No trivial solutions** — ambiguous hints and hidden issues ensure that keyword matching, fixed heuristics, and single-step reasoning are insufficient for high scores
-- **Confidence as a first-class signal** — agents must not only choose the right action but express appropriate certainty; this evaluates metacognitive capability, not just task performance
-- **Trade-offs are genuine** — there is no universally optimal action sequence; agents must balance competing objectives (safety vs. speed, thoroughness vs. efficiency) under a limited step budget
-- **Determinism and reproducibility** — despite the complexity, all grading is fully deterministic; identical agent trajectories always receive identical scores, enabling fair and repeatable evaluation
+- **Realism over simplicity** — models properties of real developer workflows (ambiguity, hidden information, cascading consequences)
+- **No trivial solutions** — ambiguous hints and hidden issues prevent keyword matching and fixed heuristics from scoring highly
+- **Confidence as a first-class signal** — evaluates metacognitive capability, not just task performance
+- **Trade-offs are genuine** — no universally optimal action sequence; agents balance competing objectives under a limited step budget
+- **Determinism and reproducibility** — identical agent trajectories always receive identical scores
 
 ---
 
@@ -219,23 +233,21 @@ A duplicate-finder function with:
 - An O(n²) algorithm (clearly signaled)
 - A **hidden** `None`-input crash, revealed only after the first fix
 
-The trade-off: optimizing first with a set-based approach implicitly fixes the loop bug, but the agent receives no explicit resolution credit and misses the sequence bonus.
+Trade-off: optimizing first with a set-based approach implicitly fixes the loop bug, but the agent receives no explicit resolution credit and misses the sequence bonus.
 
 ### Hard — Multi-Issue with Ordering (`hard_multi_issue`)
 
 A database query function with four defects:
-1. **SQL injection** — must be flagged *first* (security-first gate; violations penalized at −0.3)
+1. **SQL injection** — must be flagged *first* (security-first gate; violations penalized −0.3)
 2. **Wrong return type** — returns `None` instead of `[]` on empty results
 3. **Bubble sort** — O(n²) when `sorted()` is available
 4. **Resource leak** — connection not wrapped in `try/finally` (**hidden**, revealed after first fix)
 
-The ideal agent flags security, fixes the return type, flags the resource leak, then optimizes the sort — requiring four correctly ordered actions with appropriate confidence.
+The ideal agent flags security, fixes the return type, flags the resource leak, then optimizes the sort — four correctly ordered actions with appropriate confidence.
 
 ---
 
 ## 5. Reward Function
-
-Rewards are computed per-step and accumulate across the trajectory:
 
 | Event | Reward | Modifiers |
 |-------|--------|-----------|
@@ -248,18 +260,9 @@ Rewards are computed per-step and accumulate across the trajectory:
 | Order-constraint violation | `−0.3` | Per violated constraint |
 | Efficiency bonus (early finish) | `+0.5 × (budget remaining / max steps)` | Awarded once at episode end |
 
-This reward structure ensures that:
-- Partial solutions receive partial credit
-- Harmful decisions (wrong fixes with high confidence) are strongly penalized
-- Efficient, well-ordered trajectories are consistently preferred over wasteful ones
-
 ---
 
 ## 6. Grading Methodology
-
-### Trajectory-Based Scoring
-
-The grader evaluates the **entire episode trajectory**, not individual actions. This captures the cumulative quality of the agent's decision-making process.
 
 ### Five Evaluation Components
 
@@ -273,11 +276,10 @@ The grader evaluates the **entire episode trajectory**, not individual actions. 
 
 **Final score** = weighted sum, clamped to **[0.0, 1.0]**.
 
-### Properties
-
+Properties:
 - **Deterministic** — identical trajectories always produce identical scores
 - **Sensitive** — different strategies yield meaningfully different grades
-- **Decomposable** — each component diagnoses a specific capability
+- **Decomposable** — each component diagnoses a specific capability gap
 
 ---
 
@@ -293,20 +295,20 @@ The baseline is a **rule-based keyword matcher** that:
 ### Results
 
 | Task | Score | Completed | Failure Mode |
-|------|-------|-----------|-------------|
+|------|-------|-----------|--------------|
 | Easy | **0.999** | 2/2 | Near-perfect; simple keyword matching suffices |
-| Medium | **0.653** | 2/3 | Misses hidden edge-case; wastes 4 steps on `leave_as_is`; calibration lost due to overconfidence |
-| Hard | **0.676** | 3/4 | Misses hidden resource leak; wastes 5 steps; no exploitation of ordering |
+| Medium | **0.653** | 2/3 | Misses hidden edge-case; wastes 4 steps on `leave_as_is`; calibration lost |
+| Hard | **0.676** | 3/4 | Misses hidden resource leak; wastes 5 steps; no ordering exploitation |
 | **Average** | **0.776** | | |
 
 ### Failure Analysis
 
-1. **Hidden issues**: the baseline has no mechanism to anticipate or respond to newly revealed issues — it falls back to `leave_as_is` repeatedly, burning step budget
-2. **Ambiguity**: the edge-case hint (*"What happens if the function receives None?"*) contains no keyword the baseline recognizes, so it is ignored
-3. **Overconfidence**: a fixed 0.9 confidence means calibration loss when the baseline is wrong — a well-calibrated agent expressing 0.5 confidence on uncertain steps would score higher
-4. **Inefficiency**: repeated `leave_as_is` actions are penalized, and excess steps reduce the efficiency component
+1. **Hidden issues** — no mechanism to anticipate newly revealed issues; falls back to `leave_as_is`, burning step budget
+2. **Ambiguity** — the edge-case hint (*"What happens if the function receives None?"*) contains no keyword the baseline recognizes
+3. **Overconfidence** — fixed 0.9 confidence means calibration loss when wrong
+4. **Inefficiency** — repeated `leave_as_is` actions penalized; excess steps reduce efficiency component
 
-These are not implementation bugs — they represent genuine capability gaps that a more sophisticated agent could address through reasoning, planning, and confidence estimation.
+These are genuine capability gaps, not implementation bugs — a more sophisticated agent can address them through reasoning, planning, and confidence estimation.
 
 ---
 
@@ -314,15 +316,15 @@ These are not implementation bugs — they represent genuine capability gaps tha
 
 A perfect-scoring agent must simultaneously:
 
-- **Read and comprehend code** to infer true issue types from ambiguous textual hints
-- **Prioritize safety concerns** over functional improvements, even when functional fixes are easier
+- **Read and comprehend code** to infer issue types from ambiguous textual hints
+- **Prioritize safety concerns** over functional improvements
 - **Anticipate hidden defects** and allocate step budget accordingly
 - **Calibrate confidence** — expressing certainty only when warranted
 - **Minimize unnecessary actions** to maximize the efficiency score
-- **Follow the optimal resolution sequence** to earn ordering bonuses and avoid penalties
+- **Follow the optimal resolution sequence** to earn ordering bonuses
 - **Navigate trade-offs** where no single action is unambiguously best
 
-No single heuristic achieves this. The environment requires integrated reasoning across multiple competencies — precisely the kind of capability that distinguishes frontier AI agents from simple classifiers.
+No single heuristic achieves this. The environment requires integrated reasoning across multiple competencies — precisely what distinguishes frontier AI agents from simple classifiers.
 
 ---
 
@@ -334,7 +336,7 @@ No single heuristic achieves this. The environment requires integrated reasoning
 pip install -r requirements.txt
 ```
 
-**Dependencies**: `fastapi`, `uvicorn`, `pydantic`, `pyyaml`
+**Dependencies**: `fastapi`, `uvicorn`, `pydantic`, `pyyaml`, `openai`
 
 ### Run Baseline Agent
 
@@ -365,9 +367,9 @@ docker run -p 8000:8000 codereviewbench
 | `GET` | `/tasks` | — | List available tasks |
 | `POST` | `/grader` | — | Grade current trajectory |
 | `POST` | `/baseline` | — | Execute baseline across all tasks |
-| `POST` | `/compare_agents` | `{"task_id": "hard_multi_issue"}` (optional) | Compare all agents on one or all tasks |
-| `POST` | `/analysis` | `{"task_id": "...", "agent": "baseline"}` | Run agent and return failure analysis + impact report |
-| `POST` | `/adaptive_run` | `{"agent": "safe_agent", "num_rounds": 3}` | Run adaptive difficulty evaluation |
+| `POST` | `/compare_agents` | `{"task_id": "hard_multi_issue"}` (optional) | Compare all agents |
+| `POST` | `/analysis` | `{"task_id": "...", "agent": "baseline"}` | Failure analysis + impact report |
+| `POST` | `/adaptive_run` | `{"agent": "safe_agent", "num_rounds": 3}` | Adaptive difficulty evaluation |
 
 ### Example Interaction
 
@@ -388,9 +390,43 @@ curl -X POST localhost:8000/grader
 
 ---
 
+## Example Analysis Output
+
+The `/analysis` endpoint returns structured failure diagnostics and real-world impact reports. Below is representative output for the aggressive agent on the hard task:
+
+```json
+{
+  "agent": "aggressive_agent",
+  "task_id": "hard_multi_issue",
+  "score": 0.292,
+  "failure_modes": [
+    "Missed 3 issue(s): hard_sec_01, hard_perf_01, hard_resource_01",
+    "Failed to detect hidden issue(s) revealed mid-episode",
+    "Repeated same action 7 times consecutively",
+    "Actions were not in the expected priority order"
+  ],
+  "impact_report": [
+    {
+      "issue_id": "hard_sec_01",
+      "impact": "Data breach risk — attacker can exfiltrate or modify database contents via crafted input",
+      "risk_level": "critical"
+    },
+    {
+      "issue_id": "hard_resource_01",
+      "impact": "System instability — database connections leak on exceptions, causing resource exhaustion",
+      "risk_level": "high"
+    }
+  ]
+}
+```
+
+![analysis](./assets/analysis.png)
+
+---
+
 ## Multi-Agent Evaluation
 
-CodeReviewBench includes a **comparative evaluation mode** that runs multiple agent strategies on the same tasks under identical conditions.
+CodeReviewBench includes a **comparative evaluation mode** running multiple agent strategies on identical tasks.
 
 ### Agent Strategies
 
@@ -408,13 +444,6 @@ CodeReviewBench includes a **comparative evaluation mode** that runs multiple ag
 | `baseline` | 0.999 | 0.653 | 0.676 | 0.776 |
 | `aggressive_agent` | 1.000 | 1.000 | **0.292** | 0.764 |
 
-### Insights
-
-- **Easy tasks don't differentiate agents** — all three score ≥ 0.99
-- **Medium tasks reveal hidden-issue handling** — the aggressive and safe agents detect the edge-case while the baseline cannot
-- **Hard tasks expose strategic failures** — the aggressive agent uses `fix_bug` on a security vulnerability (wrong action type), triggers order-violation penalties, then loops `fix_bug` for 8 steps with repeat penalties, resolving only 1/4 issues
-- **Calibration matters** — the safe agent's lower but honest confidence (0.6–0.75) produces better calibration scores than the baseline's fixed 0.9
-
 ### Usage
 
 ```bash
@@ -425,19 +454,16 @@ python3 multi_agent.py
 curl -X POST localhost:8000/compare_agents \
   -H 'Content-Type: application/json' \
   -d '{"task_id": "hard_multi_issue"}'
-
-# Via API — compare on all tasks
-curl -X POST localhost:8000/compare_agents
 ```
 
 ---
 
 ## Failure Analysis Engine
 
-Beyond scoring, CodeReviewBench explains **why** agents fail through automated failure mode detection:
+Beyond scoring, CodeReviewBench explains **why** agents fail:
 
 | Failure Mode | Detection Rule | Example |
-|-------------|----------------|--------|
+|-------------|----------------|---------|
 | Missed issues | `resolved < total` | "Missed 3 issue(s): hard_sec_01, hard_perf_01, hard_resource_01" |
 | Hidden issue blindness | Unresolved issue has `hidden: true` | "Failed to detect hidden issue(s) revealed mid-episode" |
 | Overconfidence | High confidence + low calibration score | "Average confidence 0.95 but calibration score 0.21" |
@@ -446,10 +472,7 @@ Beyond scoring, CodeReviewBench explains **why** agents fail through automated f
 | Safety violations | Safety score < 0.7 | "Agent took harmful or incorrect actions" |
 | Step waste | ≥3 `leave_as_is` with issues remaining | "Used leave_as_is 5 times with issues remaining" |
 
-This provides **actionable diagnostics** — not just a number, but an explanation of what went wrong.
-
 ```bash
-# Get failure analysis for a specific agent×task
 curl -X POST localhost:8000/analysis \
   -H 'Content-Type: application/json' \
   -d '{"task_id": "hard_multi_issue", "agent": "aggressive_agent"}'
@@ -459,7 +482,7 @@ curl -X POST localhost:8000/analysis \
 
 ## Real-World Impact Modeling
 
-Each issue in the environment carries an `impact` field describing the real-world consequence of leaving it unresolved:
+Each issue carries an `impact` field describing the real-world consequence of leaving it unresolved:
 
 | Issue Type | Impact |
 |-----------|--------|
@@ -470,27 +493,11 @@ Each issue in the environment carries an `impact` field describing the real-worl
 | Resource leak | System instability — connections leak, causing exhaustion |
 | Edge case | Application crash — unhandled None input causes TypeError |
 
-The `/analysis` endpoint returns a full impact report with risk level assessment (`none`, `low`, `moderate`, `high`, `critical`).
-
----
-
-## Example Insights
-
-The `/compare_agents` endpoint generates natural-language insights automatically:
-
-> 1. *Safe Agent achieves the highest average score (0.969), demonstrating superior overall strategy.*
-> 2. *Baseline trails by 0.193 points — significant capability gap exists.*
-> 3. *On medium_logic_bug, Aggressive Agent scores 1.000 vs Baseline at 0.653 — a 0.347-point gap revealing divergent strategies under task pressure.*
-> 4. *Baseline missed 1 issue(s) on hard_multi_issue — struggles with partial observability or hidden issue detection.*
-> 5. *Aggressive Agent missed 3 issue(s) on hard_multi_issue — struggles with partial observability or hidden issue detection.*
-
-All insights are deterministic and rule-based — identical runs produce identical explanations.
-
 ---
 
 ## Adaptive Evaluation
 
-CodeReviewBench includes a **dynamic difficulty adjustment** system that progressively tests agent capabilities:
+The dynamic difficulty adjustment system progressively tests agent capabilities:
 
 | Agent Score | Difficulty Transition |
 |------------|----------------------|
@@ -518,7 +525,7 @@ curl -X POST localhost:8000/adaptive_run \
 
 ## Robustness via Noise
 
-CodeReviewBench applies **deterministic perturbations** to observation hints, simulating the imperfect signals real developers encounter:
+CodeReviewBench applies **deterministic perturbations** to observation hints, simulating imperfect signals real developers encounter:
 
 - Perturbations use hash-based selection (`seed=42 + step_number`) for full reproducibility
 - ~40% of hints receive word-level substitutions that preserve meaning but add ambiguity
@@ -550,6 +557,7 @@ This tests whether agents rely on brittle keyword matching or robust semantic un
 ├── multi_agent.py     Comparative evaluation runner with integrated analysis
 ├── baseline.py        Legacy baseline runner (standalone)
 ├── server.py          FastAPI server exposing the OpenEnv API (9 endpoints)
+├── test_env.py        Basic integration tests (reset, step, full episode)
 ├── openenv.yaml       Environment metadata and schema definitions
 ├── requirements.txt   Python dependencies
 ├── Dockerfile         Container build specification
@@ -560,9 +568,11 @@ This tests whether agents rely on brittle keyword matching or robust semantic un
 
 ## 11. Conclusion
 
-CodeReviewBench provides a **structured, deterministic, extensible, and diagnostically rich** evaluation framework for AI agents operating in sequential decision-making settings. By grounding evaluation in a realistic software engineering workflow, it measures capabilities that matter in practice — diagnostic reasoning, strategic prioritization, calibrated decision-making, and adaptive planning under partial observability — capabilities that single-step benchmarks and fully observable environments fundamentally cannot assess.
+CodeReviewBench provides a **structured, deterministic, extensible, and diagnostically rich** evaluation framework for AI agents in sequential decision-making settings. By grounding evaluation in realistic software engineering workflows, it measures capabilities that matter in practice — diagnostic reasoning, strategic prioritization, calibrated decision-making, and adaptive planning under partial observability.
 
-The framework is designed to occupy the productive region of the difficulty spectrum — easy enough that progress is measurable, hard enough that no simple heuristic achieves a perfect score. Its five-component grading methodology provides actionable diagnostic feedback, identifying *specific* capability gaps (e.g., poor calibration, inefficient sequencing) rather than returning a single opaque metric. CodeReviewBench is fully compatible with the OpenEnv specification and ready for integration into agent evaluation pipelines. This makes it a practical foundation for evaluating next-generation AI agents in real-world decision-making scenarios.
+The framework occupies the productive region of the difficulty spectrum — easy enough that progress is measurable, hard enough that no simple heuristic achieves a perfect score. Its five-component grading methodology provides actionable diagnostic feedback, identifying *specific* capability gaps rather than returning a single opaque metric.
+
+CodeReviewBench is fully compatible with the OpenEnv specification and ready for integration into agent evaluation pipelines.
 
 ---
 

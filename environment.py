@@ -53,6 +53,7 @@ class CodeReviewEnv:
         self._action_history: List[Dict[str, Any]] = []
         self._expected_idx: int = 0  # pointer into expected_sequence
         self._past_action_types: List[str] = []  # for repeat detection
+        self._last_action_wrong: bool = False  # for observation feedback hint
 
     # ──────────────────────────────────────────────────────────────────────
     # reset
@@ -76,6 +77,7 @@ class CodeReviewEnv:
         self._action_history = []
         self._expected_idx = 0
         self._past_action_types = []
+        self._last_action_wrong = False
 
         logger.info(
             "Environment reset — task=%s  visible_issues=%d  "
@@ -172,6 +174,7 @@ class CodeReviewEnv:
                     i for i in self._remaining if i["id"] != issue["id"]
                 ]
                 info["resolved_issue"] = issue["id"]
+                self._last_action_wrong = False
                 logger.info(
                     "Step %d: CORRECT %s resolved %s  "
                     "severity=%.1f  conf=%.2f  reward=%.2f",
@@ -189,6 +192,7 @@ class CodeReviewEnv:
                 base_penalty = -0.5
                 penalty_factor = 0.5 + 0.5 * conf  # [0.5, 1.0]
                 reward = base_penalty * penalty_factor
+                self._last_action_wrong = True
                 info["wrong_action_for_issue"] = issue["id"]
                 info["calibration_factor"] = round(penalty_factor, 4)
                 logger.info(
@@ -205,13 +209,16 @@ class CodeReviewEnv:
             if action.action_type == ActionType.LEAVE_AS_IS:
                 if self._remaining:
                     reward = -0.1
+                    self._last_action_wrong = True
                     info["note"] = "Issues remain but agent chose to leave as-is"
                 else:
                     reward = 0.0
+                    self._last_action_wrong = False
                     info["note"] = "All issues resolved; leave_as_is is acceptable"
             else:
                 # Unnecessary action on no matching issue
                 reward = -0.2
+                self._last_action_wrong = True
                 info["note"] = "Action did not match any remaining issue"
                 logger.info(
                     "Step %d: UNMATCHED action %s  reward=%.2f",
@@ -331,6 +338,10 @@ class CodeReviewEnv:
         if self._remaining:
             issue = self._remaining[0]
             raw_hint = issue.get("hint", issue["type"])
+            # Append a subtle feedback note if the previous action was wrong.
+            # This is deterministic — no randomness introduced.
+            if self._last_action_wrong:
+                raw_hint = raw_hint + " (previous step may have missed a deeper issue)"
             issue_type, noise_applied = inject_noise(raw_hint, self._step_count)
         else:
             issue_type = "No remaining issues detected."
