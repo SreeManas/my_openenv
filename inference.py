@@ -26,6 +26,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 ENV_URL = os.environ.get("ENV_URL", "")
 
 MAX_STEPS = 8
+MAX_REASON_LEN = 160  # max chars shown for explanation in step logs
 
 SYSTEM_PROMPT = """You are an AI code reviewer. Based on the given issue description, choose one action:
 - fix_bug: Fix a bug or logic error in the code
@@ -157,10 +158,13 @@ def run_task(task_id: str) -> dict:
             max_steps=obs.get("max_steps", MAX_STEPS),
         )
 
+        clean_reason = action["explanation"].strip().replace("\n", " ")
+        if len(clean_reason) > MAX_REASON_LEN:
+            clean_reason = clean_reason[:MAX_REASON_LEN] + "..."
         print(
-            f"  Step {step_num}: {action['action_type']:15s}  "
+            f"  Step {step_num}: {action['action_type']:<15}  "
             f"conf={action['confidence']:.2f}  "
-            f"reason={action['explanation'][:60]}"
+            f"reason={clean_reason}"
         )
 
         # Send action to environment
