@@ -609,9 +609,10 @@ HARD_TASK: Dict[str, Any] = {
             "id": "hard_sec_01",
             "type": "security_vulnerability",
             "hint": (
-                "User-supplied data appears to flow into a sensitive "
-                "operation without sanitization. Investigate the query "
-                "construction."
+                "An external value provided by the user is incorporated "
+                "directly into a privileged internal operation. Without "
+                "proper validation this creates an uncontrolled path that "
+                "a malicious actor could exploit to alter system behaviour."
             ),
             "description": (
                 "SQL injection: user input is interpolated directly "
@@ -628,9 +629,10 @@ HARD_TASK: Dict[str, Any] = {
             "id": "hard_logic_01",
             "type": "logic_error",
             "hint": (
-                "Callers of this function sometimes receive an unexpected "
-                "return type that causes downstream crashes. Check the "
-                "return paths."
+                "The function behaves unexpectedly when no records match "
+                "the query. Callers in downstream code report receiving "
+                "a value that does not conform to the expected return "
+                "contract, causing errors on the caller's side."
             ),
             "description": (
                 "Returns None instead of an empty list when no orders "
@@ -644,8 +646,10 @@ HARD_TASK: Dict[str, Any] = {
             "id": "hard_perf_01",
             "type": "performance",
             "hint": (
-                "The sorting step uses a pattern that doesn't scale well. "
-                "Consider using built-in language features."
+                "Under load the function's response time grows "
+                "disproportionately as record count increases. "
+                "The loop-based ordering mechanism does not scale "
+                "efficiently with larger datasets."
             ),
             "description": (
                 "Uses O(n²) bubble sort instead of Python's built-in "
@@ -659,9 +663,10 @@ HARD_TASK: Dict[str, Any] = {
             "id": "hard_resource_01",
             "type": "resource_leak",
             "hint": (
-                "If an exception is raised during execution, some "
-                "resources may not be properly released. Consider "
-                "exception-safety patterns."
+                "Monitoring shows a slow exhaustion of a finite system "
+                "resource over time. Under failure conditions the resource "
+                "is not properly released, eventually causing the system "
+                "to become unresponsive."
             ),
             "description": (
                 "Database connection is not wrapped in try/finally; "
@@ -1058,9 +1063,10 @@ EDGE_TASK: Dict[str, Any] = {
             "id": "edge_mutate_01",
             "type": "logic_error",
             "hint": (
-                "After calling this function, the original list passed by "
-                "the caller is in a different order than expected. "
-                "Investigate whether the function has side effects."
+                "Tests that pass in isolation produce unexpected failures "
+                "when run in sequence. Investigate whether the function "
+                "has unintended interactions with its inputs — it may be "
+                "modifying data that callers expect to remain unchanged."
             ),
             "description": (
                 "values.sort() mutates the caller's list in-place; "
@@ -1078,9 +1084,10 @@ EDGE_TASK: Dict[str, Any] = {
             "id": "edge_logic_01",
             "type": "logic_error",
             "hint": (
-                "The averaging calculation produces values that are slightly "
-                "inconsistent with manual calculations on the same input. "
-                "Examine how the loop index maps to window size."
+                "The averaging output does not match manual calculations "
+                "on identical data. The loop bounds appear correct at "
+                "first glance but the mismatch grows near the end of "
+                "the input sequence — examine the window calculation."
             ),
             "description": (
                 "Loop uses range(1, len+1) with window = values[:i], "
@@ -1098,8 +1105,10 @@ EDGE_TASK: Dict[str, Any] = {
             "id": "edge_empty_01",
             "type": "edge_case",
             "hint": (
-                "What happens when this function is called with an empty "
-                "collection? Check boundary conditions in the calculation."
+                "The function raises an unhandled exception on a specific "
+                "boundary input not covered by existing tests. Defensive "
+                "handling of empty or atypical inputs is missing from "
+                "this code path."
             ),
             "description": (
                 "Calling with an empty list causes ZeroDivisionError "
@@ -1829,10 +1838,11 @@ CONC_TASK: Dict[str, Any] = {
             "id": "conc_mutable_01",
             "type": "logic_error",
             "hint": (
-                "The function signature includes a default parameter that "
-                "appears safe but is shared across all calls. Investigate "
-                "what happens to that parameter when the function is called "
-                "multiple times without passing it explicitly."
+                "Although no global variables are used, the function "
+                "produces unexpected results when called repeatedly. "
+                "Each call accumulates state from the previous one — "
+                "examine the function signature for shared mutable "
+                "objects."
             ),
             "description": (
                 "results=[] is a mutable default argument — Python creates "
@@ -1851,10 +1861,10 @@ CONC_TASK: Dict[str, Any] = {
             "id": "conc_counter_01",
             "type": "logic_error",
             "hint": (
-                "The summarise function reports a total count that does not "
-                "match the sum of individually processed batches. Trace how "
-                "results from each batch are collected into the final return "
-                "value."
+                "The final report is consistently smaller than expected. "
+                "Despite processing all batches, only a subset of results "
+                "appears in the output — trace how results are collected "
+                "and returned across loop iterations."
             ),
             "description": (
                 "summarise references `out['results']` after the loop, "
@@ -1872,9 +1882,10 @@ CONC_TASK: Dict[str, Any] = {
             "id": "conc_stale_01",
             "type": "edge_case",
             "hint": (
-                "If the input list of batches is empty, the final return "
-                "statement references a variable that was never assigned. "
-                "Check whether all code paths define every variable used."
+                "When invoked with no pending work the system raises an "
+                "unbound or undefined variable error rather than returning "
+                "an empty result. Not all code paths initialise the "
+                "variable used in the return statement."
             ),
             "description": (
                 "When batches=[], the loop body never executes so `out` is "

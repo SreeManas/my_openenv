@@ -410,8 +410,8 @@ if __name__ == "__main__":
     try:
         main()
     except ValueError as exc:
-        print(f"[CONFIG ERROR] {exc}", file=__import__("sys").stderr)
+        print(f"[CONFIG ERROR] {exc}", file=sys.stderr)
         raise SystemExit(1)
     except Exception as exc:
-        print(f"[FATAL ERROR] {exc}", file=__import__("sys").stderr)
+        print(f"[FATAL ERROR] {exc}", file=sys.stderr)
         raise SystemExit(1)
