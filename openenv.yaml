@@ -110,3 +110,28 @@ tasks:
     issues: 4
     max_steps: 8
     features: [ambiguous_hints, hidden_issue, order_constraints, trade_offs]
+  - id: medium_security_variant
+    difficulty: medium
+    issues: 3
+    max_steps: 6
+    features: [ambiguous_hints, hidden_issue, order_constraints, security]
+  - id: hard_edge_case
+    difficulty: hard
+    issues: 3
+    max_steps: 8
+    features: [ambiguous_hints, hidden_issue, order_constraints]
+  - id: performance_heavy
+    difficulty: medium
+    issues: 3
+    max_steps: 6
+    features: [ambiguous_hints, hidden_issue, trade_offs]
+  - id: data_validation_pipeline
+    difficulty: medium
+    issues: 3
+    max_steps: 6
+    features: [ambiguous_hints, hidden_issue, order_constraints]
+  - id: concurrency_bug
+    difficulty: hard
+    issues: 3
+    max_steps: 8
+    features: [ambiguous_hints, hidden_issue, order_constraints]

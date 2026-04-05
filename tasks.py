@@ -212,8 +212,9 @@ MEDIUM_TASK: Dict[str, Any] = {
     "context": (
         "This function is supposed to find duplicate values in a list. "
         "During testing, unexpected behavior was observed: it runs slowly "
-        "on large inputs and some reviewers noticed redundant work being "
-        "done. There may also be robustness concerns."
+        "on large inputs and reviewers noticed redundant comparisons "
+        "suggesting incorrect loop bounds. There may also be robustness "
+        "concerns with unexpected input types."
     ),
     "issues": [
         {
@@ -222,8 +223,9 @@ MEDIUM_TASK: Dict[str, Any] = {
             # Ambiguous hint — doesn't say "logic error"
             "hint": (
                 "Unexpected behavior: the function produces correct output "
-                "but performs redundant comparisons. Investigate the loop "
-                "bounds."
+                "but performs redundant comparisons due to incorrect loop "
+                "bounds. The inner loop iterates more than necessary — "
+                "this is a logic defect, not just a performance issue."
             ),
             "description": (
                 "Inner loop starts at 0 instead of i+1, "
@@ -860,8 +862,9 @@ SEC_TASK: Dict[str, Any] = {
             "id": "sec_token_01",
             "type": "security_vulnerability",
             "hint": (
-                "The token generation strategy may allow an attacker to "
-                "predict future tokens. Review how entropy is introduced."
+                "The token generation method may be predictable or reused — "
+                "an attacker could guess valid tokens. This is a security "
+                "concern that should be flagged for review."
             ),
             "description": (
                 "Token is derived from the current Unix timestamp — "
@@ -879,8 +882,9 @@ SEC_TASK: Dict[str, Any] = {
             "id": "sec_log_01",
             "type": "security_vulnerability",
             "hint": (
-                "Sensitive credentials appear in application output. "
-                "Check what the function emits during normal operation."
+                "Sensitive token data is printed to application logs during "
+                "normal operation. This credential exposure should be fixed "
+                "by removing the print statement."
             ),
             "description": (
                 "Reset token is printed to stdout, which lands in "

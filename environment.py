@@ -338,10 +338,25 @@ class CodeReviewEnv:
         if self._remaining:
             issue = self._remaining[0]
             raw_hint = issue.get("hint", issue["type"])
-            # Append a subtle feedback note if the previous action was wrong.
-            # This is deterministic — no randomness introduced.
+            # Append deterministic feedback hints based on agent state.
+            # These guide the LLM without revealing ground truth.
             if self._last_action_wrong:
-                raw_hint = raw_hint + " (previous step may have missed a deeper issue)"
+                raw_hint = (
+                    raw_hint
+                    + " — Previous action may have been incorrect or "
+                    "incomplete. Re-evaluate assumptions about the issue type."
+                )
+            # Detect repeated actions: if last 2+ actions are the same type
+            if (
+                len(self._past_action_types) >= 2
+                and self._past_action_types[-1] == self._past_action_types[-2]
+                and self._past_action_types[-1] != "leave_as_is"
+            ):
+                raw_hint = (
+                    raw_hint
+                    + " — Repeated actions are not yielding progress. "
+                    "Try a different approach or action type."
+                )
             issue_type, noise_applied = inject_noise(raw_hint, self._step_count)
         else:
             issue_type = "No remaining issues detected."

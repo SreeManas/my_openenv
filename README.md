@@ -31,27 +31,27 @@ Most AI benchmarks are single-step. CodeReviewBench is not.
 
 ---
 
-## Agent Performance
+## Agent Performance (8 tasks)
 
-| Agent            | Easy  | Medium | Hard  | Avg       |
-| ---------------- | ----- | ------ | ----- | --------- |
-| `safe_agent`     | 0.992 | 0.985  | 0.937 | **0.969** |
-| `baseline`       | 0.999 | 0.653  | 0.676 | 0.776     |
-| `aggressive_agent` | 1.000 | 1.000 | 0.292 | 0.764   |
+| Agent            | Easy  | Med (logic) | Med (security) | Hard (multi) | Hard (edge) | Med (perf) | Med (validation) | Hard (conc) | **Avg** |
+| ---------------- | ----- | ----------- | -------------- | ------------ | ----------- | ---------- | ---------------- | ----------- | ------- |
+| `safe_agent`     | 0.984 | 0.985       | **0.988**      | 0.937        | 0.987       | 0.982      | 0.921            | 0.987       | **0.971** |
+| `baseline`       | 0.929 | 0.653       | 0.999          | 0.676        | 0.999       | 0.999      | 0.597            | 0.999       | 0.856   |
+| `aggressive`     | 1.000 | 1.000       | 0.588          | 0.292        | 1.000       | 0.379      | 0.588            | 1.000       | 0.731   |
 
-Key insight: **easy tasks don't differentiate agents** — hard tasks do. The aggressive agent collapses on hard tasks (0.292) due to order violations and action repetition. Only the safe agent sustains performance across all difficulty levels.
+Key insight: **easy tasks don't differentiate agents** — safety-critical and multi-step tasks do. The aggressive agent collapses on security tasks (0.292–0.588) due to order violations and wrong action types. Only the safe agent sustains **97%+ performance** across all 8 tasks and difficulty levels.
 
 ---
 
 ## Abstract
 
-**CodeReviewBench** is a fully OpenEnv-compliant, deployment-ready reinforcement-learning environment that provides a structured framework for evaluating AI agents on sequential code analysis, bug resolution, and optimization tasks. Unlike single-step classification benchmarks, CodeReviewBench requires agents to operate under **partial observability**, **ambiguous feedback signals**, and **inter-dependent action constraints** — properties characteristic of real-world software engineering workflows.
+**CodeReviewBench** is a fully OpenEnv-compliant, deployment-ready reinforcement-learning environment that provides a structured framework for evaluating AI agents on sequential code analysis, bug resolution, and optimization tasks across **8 diverse tasks**. Unlike single-step classification benchmarks, CodeReviewBench requires agents to operate under **partial observability**, **ambiguous feedback signals**, and **inter-dependent action constraints** — properties characteristic of real-world software engineering workflows.
 
-The environment features dynamic state evolution, hidden defect discovery, confidence-calibrated reward shaping, adaptive difficulty adjustment, deterministic noise injection, and trajectory-based grading across five evaluation dimensions.
+The environment features dynamic state evolution, hidden defect discovery, confidence-calibrated reward shaping, adaptive difficulty adjustment, deterministic noise injection, trajectory-aware observation feedback, and trajectory-based grading across five evaluation dimensions.
 
 **CodeReviewBench not only evaluates what decisions an agent makes, but why those decisions succeed or fail, and what their real-world consequences would be.**
 
-A rule-based baseline agent achieves an average score of **0.776** — demonstrating that the environment is neither trivially solvable nor intractably difficult.
+A rule-based baseline agent achieves an average score of **0.856** across 8 tasks — demonstrating that the environment is neither trivially solvable nor intractably difficult. The safe agent achieves **0.971**.
 
 ---
 
@@ -215,27 +215,27 @@ After each action, the environment updates `code_snippet` to reflect the applied
 
 | Property | Easy | Medium | Hard |
 |----------|------|--------|------|
-| Total issues | 2 | 3 | 4 |
+| Total issues | 2 | 3 | 3–4 |
 | *Hidden* issues | 0 | 1 | 1 |
 | Max steps | 4 | 6 | 8 |
-| Order constraints | No | No | Yes (security-first) |
+| Order constraints | No | Some | Yes (security-first) |
 | Trade-offs | Minimal | Moderate | Significant |
-| Issue types | Syntax, style | Logic, performance, edge-case | Security, logic, performance, resource leak |
+| Issue types | Syntax, style | Logic, performance, edge-case, security | Security, logic, performance, resource leak |
 
-### Easy — Syntax Error (`easy_syntax_bug`)
+### Task 1: Easy — Syntax Error (`easy_syntax_bug`)
 
 A function with a missing colon after an `if` statement, plus a minor style improvement. Straightforward for any agent capable of reading Python syntax.
 
-### Medium — Logic + Performance + Hidden Edge Case (`medium_logic_bug`)
+### Task 2: Medium — Logic + Performance + Hidden Edge Case (`medium_logic_bug`)
 
 A duplicate-finder function with:
-- An off-by-one loop (described as *"unexpected behavior"*, not *"logic error"*)
+- An off-by-one loop (described as *"incorrect loop bounds"*, not *"logic error"*)
 - An O(n²) algorithm (clearly signaled)
 - A **hidden** `None`-input crash, revealed only after the first fix
 
 Trade-off: optimizing first with a set-based approach implicitly fixes the loop bug, but the agent receives no explicit resolution credit and misses the sequence bonus.
 
-### Hard — Multi-Issue with Ordering (`hard_multi_issue`)
+### Task 3: Hard — Multi-Issue with Ordering (`hard_multi_issue`)
 
 A database query function with four defects:
 1. **SQL injection** — must be flagged *first* (security-first gate; violations penalized −0.3)
@@ -243,7 +243,48 @@ A database query function with four defects:
 3. **Bubble sort** — O(n²) when `sorted()` is available
 4. **Resource leak** — connection not wrapped in `try/finally` (**hidden**, revealed after first fix)
 
-The ideal agent flags security, fixes the return type, flags the resource leak, then optimizes the sort — four correctly ordered actions with appropriate confidence.
+The ideal agent flags security, fixes the return type, flags the resource leak, then optimizes the sort.
+
+### Task 4: Medium — Security Variant (`medium_security_variant`)
+
+A password reset token module with:
+1. **Predictable tokens** — timestamp-based generation (must be flagged, security-first)
+2. **Credential leakage** — token printed to logs (**hidden**, revealed after flagging)
+3. **Missing input validation** — no guard on malformed tokens
+
+Tests whether agents can distinguish "flag for review" from "fix directly" on security issues.
+
+### Task 5: Hard — Edge Case Cascade (`hard_edge_case`)
+
+A running-average utility with:
+1. **Mutable default** — `values.sort()` mutates caller's list (data corruption)
+2. **Loop index error** — off-by-one in window calculation
+3. **Empty input crash** — no guard for empty lists (**hidden**)
+
+Order matters: fixing the mutation before the logic bug prevents misdiagnosis.
+
+### Task 6: Medium — Performance Heavy (`performance_heavy`)
+
+A report-generation function with three independent performance issues:
+1. **Selection sort** — O(n²) when `sorted()` is available
+2. **String concatenation** — quadratic allocations in loop
+3. **Intermediate list** — unnecessary materialization (**hidden**)
+
+All three expected actions are `optimize_code` — tests whether agents avoid defaulting to `fix_bug`.
+
+### Task 7: Medium — Data Validation Pipeline (`data_validation_pipeline`)
+
+A user registration handler with:
+1. **Missing field guard** — `KeyError` on absent fields (priority gate)
+2. **Unsafe type cast** — `int()` on non-numeric input (**hidden**)
+3. **No email validation** — arbitrary strings stored (flag required)
+
+### Task 8: Hard — Concurrency Bug (`concurrency_bug`)
+
+A batch processing module with:
+1. **Mutable default argument** — shared state across calls (priority gate)
+2. **Counter undercount** — only last batch reported
+3. **Unbound variable** — crash on empty input (**hidden**)
 
 ---
 
@@ -296,10 +337,15 @@ The baseline is a **rule-based keyword matcher** that:
 
 | Task | Score | Completed | Failure Mode |
 |------|-------|-----------|--------------|
-| Easy | **0.999** | 2/2 | Near-perfect; simple keyword matching suffices |
-| Medium | **0.653** | 2/3 | Misses hidden edge-case; wastes 4 steps on `leave_as_is`; calibration lost |
-| Hard | **0.676** | 3/4 | Misses hidden resource leak; wastes 5 steps; no ordering exploitation |
-| **Average** | **0.776** | | |
+| Easy | **0.929** | 2/2 | Near-perfect; simple keyword matching suffices |
+| Medium (logic) | **0.653** | 2/3 | Misses hidden edge-case; wastes 4 steps on `leave_as_is` |
+| Medium (security) | **0.999** | 3/3 | Catches all keywords after hint improvement |
+| Hard (multi) | **0.676** | 3/4 | Misses hidden resource leak; no ordering exploitation |
+| Hard (edge) | **0.999** | 3/3 | New keyword coverage catches mutation/edge bugs |
+| Medium (perf) | **0.999** | 3/3 | Optimize keywords matched correctly |
+| Medium (validation) | **0.597** | 2/3 | Misses email flag — requires flag_issue |
+| Hard (concurrency) | **0.999** | 3/3 | Default-param and counter keywords matched |
+| **Average** | **0.856** | | |
 
 ### Failure Analysis
 
@@ -438,11 +484,13 @@ CodeReviewBench includes a **comparative evaluation mode** running multiple agen
 
 ### Results
 
-| Agent | Easy | Medium | Hard | **Average** |
-|-------|------|--------|------|-------------|
-| `safe_agent` | 0.992 | 0.985 | **0.937** | **0.969** ◀ BEST |
-| `baseline` | 0.999 | 0.653 | 0.676 | 0.776 |
-| `aggressive_agent` | 1.000 | 1.000 | **0.292** | 0.764 |
+| Agent | Easy | Med† | Med† | Hard | Hard | Med | Med | Hard | **Average** |
+|-------|------|------|------|------|------|-----|-----|------|-------------|
+| `safe_agent` | 0.984 | 0.985 | **0.988** | 0.937 | 0.987 | 0.982 | 0.921 | 0.987 | **0.971** ◀ BEST |
+| `baseline` | 0.929 | 0.653 | 0.999 | 0.676 | 0.999 | 0.999 | 0.597 | 0.999 | 0.856 |
+| `aggressive_agent` | 1.000 | 1.000 | 0.588 | 0.292 | 1.000 | 0.379 | 0.588 | 1.000 | 0.731 |
+
+*†Med = medium difficulty tasks with different focus areas*
 
 ### Usage
 
@@ -547,11 +595,12 @@ This tests whether agents rely on brittle keyword matching or robust semantic un
 
 ```
 ├── models.py          Pydantic models (Action, Observation, StepResult, EnvironmentState)
-├── tasks.py           Task definitions with hints, hidden issues, impacts, and order constraints
+├── tasks.py           8 task definitions with hints, hidden issues, impacts, and order constraints
 ├── grader.py          Five-component trajectory grader with calibration scoring
-├── environment.py     Multi-step environment with state evolution, reward shaping, and noise
+├── environment.py     Multi-step environment with state evolution, reward shaping, feedback hints, and noise
 ├── noise.py           Deterministic noise injection engine (toggleable)
 ├── agents.py          Agent ABC + 3 strategy implementations (baseline, aggressive, safe)
+├── inference.py       LLM inference agent with trajectory awareness and anti-repeat guidance
 ├── analysis.py        Failure analysis, impact modeling, and insight generation
 ├── adaptive.py        Adaptive difficulty system with progressive task selection
 ├── multi_agent.py     Comparative evaluation runner with integrated analysis
