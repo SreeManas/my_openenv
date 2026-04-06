@@ -9,7 +9,7 @@ Environment variables:
     MODEL_NAME    — Model identifier (e.g. meta-llama/Llama-3-70B-Instruct)
     HF_TOKEN      — HuggingFace API token
 """
-
+import sys
 import os
 import json
 import requests

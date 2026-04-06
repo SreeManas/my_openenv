@@ -466,7 +466,7 @@ The `/analysis` endpoint returns structured failure diagnostics and real-world i
 }
 ```
 
-![analysis](./assets/analysis.png)
+
 
 ---
 
