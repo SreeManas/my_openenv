@@ -19,11 +19,11 @@ from openai import OpenAI
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1")
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3-70B-Instruct")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
-ENV_URL = os.environ.get("ENV_URL", "")
+ENV_URL = os.environ.get("ENV_URL", "https://sreemanas-mycodeenv.hf.space")
 
 MAX_STEPS = 8
 MAX_REASON_LEN = 160  # max chars shown for explanation in step logs
