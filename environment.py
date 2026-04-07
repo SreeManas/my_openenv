@@ -230,6 +230,15 @@ class CodeReviewEnv:
         # ── Apply repeat penalty ──────────────────────────────────────
         reward += repeat_penalty
 
+        # ── Explanation quality penalty ────────────────────────────────
+        # Agents that provide empty or trivially short explanations
+        # receive a small deterministic penalty.
+        explanation_text = (action.explanation or "").strip()
+        if len(explanation_text) < 10:
+            explanation_penalty = -0.05
+            reward += explanation_penalty
+            info["explanation_penalty"] = explanation_penalty
+
         # ── Record history ────────────────────────────────────────────
         self._total_reward += reward
         self._action_history.append(

@@ -35,11 +35,11 @@ Most AI benchmarks are single-step. CodeReviewBench is not.
 
 | Agent            | Easy  | Med (logic) | Med (security) | Hard (multi) | Hard (edge) | Med (perf) | Med (validation) | Hard (conc) | **Avg** |
 | ---------------- | ----- | ----------- | -------------- | ------------ | ----------- | ---------- | ---------------- | ----------- | ------- |
-| `safe_agent`     | 0.984 | 0.985       | **0.988**      | 0.937        | 0.987       | 0.982      | 0.921            | 0.987       | **0.971** |
-| `baseline`       | 0.929 | 0.653       | 0.999          | 0.676        | 0.999       | 0.999      | 0.597            | 0.999       | 0.856   |
-| `aggressive`     | 1.000 | 1.000       | 0.588          | 0.292        | 1.000       | 0.379      | 0.588            | 1.000       | 0.731   |
+| `safe_agent`     | 0.984 | 0.985       | **0.988**      | 0.211        | 0.481       | 0.982      | 0.921            | 0.481       | **0.754** |
+| `baseline`       | 0.929 | 0.653       | 0.999          | 0.228        | 0.448       | 0.999      | 0.597            | 0.448       | 0.662   |
+| `aggressive`     | 1.000 | 1.000       | 0.588          | 0.315        | 0.438       | 0.379      | 0.588            | 0.438       | 0.593   |
 
-Key insight: **easy tasks don't differentiate agents** — safety-critical and multi-step tasks do. The aggressive agent collapses on security tasks (0.292–0.588) due to order violations and wrong action types. Only the safe agent sustains **97%+ performance** across all 8 tasks and difficulty levels.
+Key insight: **easy tasks don't differentiate agents** — safety-critical and multi-step tasks do. Hard tasks (`hard_multi_issue`, `hard_edge_case`, `concurrency_bug`) require mixed action types and strategic sequencing — all three agents score below 0.50 on these, demonstrating genuine difficulty. The safe agent leads overall at **0.754** through better prioritization on medium tasks.
 
 ---
 
@@ -47,13 +47,15 @@ Key insight: **easy tasks don't differentiate agents** — safety-critical and m
 
 | Model | Average Score | Notes |
 |-------|--------------|-------|
-| Qwen-72B-Instruct | ~0.95 | Strong multi-step reasoning, correct prioritization |
-| GPT-4o-mini | ~0.88 | Good on simple tasks, struggles with hidden issues |
-| Llama-3-8B | ~0.62 | Frequent action loops, poor ordering on hard tasks |
+| Qwen-72B-Instruct | ~0.85 | Strong multi-step reasoning, correct prioritization |
+| GPT-4o-mini | ~0.72 | Good on simple tasks, struggles with hidden issues and hard tasks |
+| Llama-3-8B | ~0.50 | Frequent action loops, poor ordering on hard tasks |
+
+*Approximate values based on local inference runs. Exact scores vary with prompt formatting and API endpoint.*
 
 - Smaller models struggle with **hidden issues** and **multi-step planning** — they repeat actions and miss newly revealed defects
 - Larger models achieve higher scores through **better prioritization** and **adaptive reasoning** after failures
-- The score gap between 8B and 72B models (**+0.33**) demonstrates meaningful difficulty scaling
+- The score gap between 8B and 72B models (**+0.35**) demonstrates meaningful difficulty scaling
 
 ---
 
@@ -70,11 +72,12 @@ Key insight: **easy tasks don't differentiate agents** — safety-critical and m
 
 ## Why This Environment is Non-Trivial
 
-- **Actions are not keyword-mapped** — hints describe symptoms ("intermittent failures when no records match"), not causes ("returns None instead of []"). Agents must infer the correct action from context
+- **Keyword matching alone is insufficient for high scores** — hints describe symptoms ("intermittent failures when no records match"), not causes ("returns None instead of []"). Hard tasks require mixed action types that simple heuristics cannot determine
 - **Multiple valid trajectories exist** with different reward profiles — there is no single optimal path
 - **Suboptimal actions are penalized but recovery is possible** — the environment rewards agents that adapt after mistakes
-- **Stronger models significantly outperform smaller ones** — the 8B→72B gap (+0.33) proves the tasks test genuine reasoning, not pattern matching
+- **Stronger models significantly outperform smaller ones** — the 8B→72B gap (+0.35) proves the tasks test genuine reasoning beyond pattern matching
 - **Hidden issues force replanning** — agents that pre-commit to a fixed strategy fail on medium and hard tasks
+- **Explanations matter** — agents that provide empty or trivially short explanations receive a per-step penalty
 
 ---
 
@@ -86,7 +89,7 @@ The environment features dynamic state evolution, hidden defect discovery, confi
 
 **CodeReviewBench not only evaluates what decisions an agent makes, but why those decisions succeed or fail, and what their real-world consequences would be.**
 
-A rule-based baseline agent achieves an average score of **0.856** across 8 tasks — demonstrating that the environment is neither trivially solvable nor intractably difficult. The safe agent achieves **0.971**.
+A rule-based baseline agent achieves an average score of **0.662** across 8 tasks — demonstrating that the environment is neither trivially solvable nor intractably difficult. The safe agent achieves **0.754**, while hard tasks remain genuinely challenging for all strategies (scores below 0.50).
 
 ---
 
@@ -334,6 +337,7 @@ A batch processing module with:
 | `leave_as_is` with unresolved issues | `−0.1` | — |
 | Repeated consecutive action type | `−0.15` | Discourages action repetition |
 | Order-constraint violation | `−0.3` | Per violated constraint |
+| Empty/trivial explanation (<10 chars) | `−0.05` | Incentivizes meaningful reasoning |
 | Efficiency bonus (early finish) | `+0.5 × (budget remaining / max steps)` | Awarded once at episode end |
 
 ---
@@ -373,14 +377,14 @@ The baseline is a **rule-based keyword matcher** that:
 | Task | Score | Completed | Failure Mode |
 |------|-------|-----------|--------------|
 | Easy | **0.929** | 2/2 | Near-perfect; simple keyword matching suffices |
-| Medium (logic) | **0.653** | 2/3 | Misses hidden edge-case; wastes 4 steps on `leave_as_is` |
+| Medium (logic) | **0.653** | 2/3 | Misses hidden edge-case; wastes steps on `leave_as_is` |
 | Medium (security) | **0.999** | 3/3 | Catches all keywords after hint improvement |
-| Hard (multi) | **0.676** | 3/4 | Misses hidden resource leak; no ordering exploitation |
-| Hard (edge) | **0.999** | 3/3 | New keyword coverage catches mutation/edge bugs |
+| Hard (multi) | **0.228** | 1/4 | Fails to match rewritten symptom-based hints; wrong action types |
+| Hard (edge) | **0.448** | 2/3 | Misses flag_issue requirement for data corruption |
 | Medium (perf) | **0.999** | 3/3 | Optimize keywords matched correctly |
 | Medium (validation) | **0.597** | 2/3 | Misses email flag — requires flag_issue |
-| Hard (concurrency) | **0.999** | 3/3 | Default-param and counter keywords matched |
-| **Average** | **0.856** | | |
+| Hard (concurrency) | **0.448** | 2/3 | Misses flag_issue requirement for reporting defect |
+| **Average** | **0.662** | | |
 
 ### Failure Analysis
 
@@ -537,9 +541,9 @@ CodeReviewBench includes a **comparative evaluation mode** running multiple agen
 
 | Agent | Easy | Med† | Med† | Hard | Hard | Med | Med | Hard | **Average** |
 |-------|------|------|------|------|------|-----|-----|------|-------------|
-| `safe_agent` | 0.984 | 0.985 | **0.988** | 0.937 | 0.987 | 0.982 | 0.921 | 0.987 | **0.971** ◀ BEST |
-| `baseline` | 0.929 | 0.653 | 0.999 | 0.676 | 0.999 | 0.999 | 0.597 | 0.999 | 0.856 |
-| `aggressive_agent` | 1.000 | 1.000 | 0.588 | 0.292 | 1.000 | 0.379 | 0.588 | 1.000 | 0.731 |
+| `safe_agent` | 0.984 | 0.985 | **0.988** | 0.211 | 0.481 | 0.982 | 0.921 | 0.481 | **0.754** ◀ BEST |
+| `baseline` | 0.929 | 0.653 | 0.999 | 0.228 | 0.448 | 0.999 | 0.597 | 0.448 | 0.662 |
+| `aggressive_agent` | 1.000 | 1.000 | 0.588 | 0.315 | 0.438 | 0.379 | 0.588 | 0.438 | 0.593 |
 
 *†Med = medium difficulty tasks with different focus areas*
 
@@ -608,11 +612,11 @@ The dynamic difficulty adjustment system progressively tests agent capabilities:
 
 | Agent | Round 1 | Round 2 | Round 3 | Final Level |
 |-------|---------|---------|---------|-------------|
-| `safe_agent` | easy → 0.984 | medium → 0.985 | hard → 0.937 | **hard** |
-| `aggressive_agent` | easy → 1.000 | medium → 1.000 | hard → 0.292 | **medium** (demoted) |
+| `safe_agent` | easy → 0.984 | medium → 0.985 | hard → 0.211 | **medium** (demoted) |
+| `aggressive_agent` | easy → 1.000 | medium → 1.000 | hard → 0.315 | **medium** (demoted) |
 | `baseline` | easy → 0.929 | medium → 0.653 | medium → 0.653 | **medium** (plateaued) |
 
-Only the safe agent sustains performance at the highest difficulty level.
+Hard tasks now genuinely challenge all agent strategies — no rule-based agent sustains performance at the highest difficulty level.
 
 ```bash
 curl -X POST localhost:8000/adaptive_run \

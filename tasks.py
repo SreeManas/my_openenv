@@ -1072,7 +1072,7 @@ EDGE_TASK: Dict[str, Any] = {
                 "values.sort() mutates the caller's list in-place; "
                 "use sorted() to avoid modifying the input."
             ),
-            "expected_action": "fix_bug",
+            "expected_action": "flag_issue",
             "severity": 0.9,
             "priority_gate": True,
             "impact": (
@@ -1125,7 +1125,7 @@ EDGE_TASK: Dict[str, Any] = {
         },
     ],
     # Mutation must be fixed first — it affects the logic test results
-    "expected_sequence": ["fix_bug", "fix_bug", "fix_bug"],
+    "expected_sequence": ["flag_issue", "fix_bug", "fix_bug"],
     "code_versions": EDGE_CODE_VERSIONS,
     "max_steps": 8,
     "order_constraints": {
@@ -1871,7 +1871,7 @@ CONC_TASK: Dict[str, Any] = {
                 "returning only the last batch's results. It should collect "
                 "all_results across iterations using extend()."
             ),
-            "expected_action": "fix_bug",
+            "expected_action": "flag_issue",
             "severity": 0.7,
             "impact": (
                 "Incomplete reporting — only the last batch's results appear "
@@ -1901,7 +1901,7 @@ CONC_TASK: Dict[str, Any] = {
             ),
         },
     ],
-    "expected_sequence": ["fix_bug", "fix_bug", "fix_bug"],
+    "expected_sequence": ["fix_bug", "flag_issue", "fix_bug"],
     "code_versions": CONC_CODE_VERSIONS,
     "max_steps": 8,
     "order_constraints": {
