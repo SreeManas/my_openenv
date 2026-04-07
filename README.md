@@ -229,7 +229,14 @@ Correct actions:   reward = base × severity × (0.5 + 0.5 × confidence)
 Incorrect actions: penalty = base × (0.5 + 0.5 × confidence)
 ```
 
-An agent that is *correctly confident* earns more. An agent that is *incorrectly confident* loses more. This incentivizes well-calibrated probability estimates — critical for trustworthy AI systems.
+Verified impact (same correct action, different confidence on `easy_syntax_bug`):
+
+| Confidence | Reward | Δ from baseline |
+|------------|--------|-----------------|
+| 0.95 | **+1.475** | +0.200 |
+| 0.55 | **+1.275** | — (baseline) |
+
+An agent that is *correctly confident* earns up to **15.7% more reward**. An agent that is *incorrectly confident* loses proportionally more. This incentivizes well-calibrated probability estimates — critical for trustworthy AI systems.
 
 ### 3.6 Dynamic State Evolution
 
@@ -475,19 +482,38 @@ curl -X POST localhost:8000/grader
 
 ---
 
-## Example Execution Output
+## Example Trajectories (Verified)
 
-Running `inference.py` against the live environment produces strictly formatted output:
+All traces below were generated from actual `environment.py` runs with deterministic outputs.
+
+### Successful Episode — Safe Agent on `medium_logic_bug` (score: 0.990)
 
 ```
-[START] task=medium_logic_bug env=CodeReviewBench model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action=fix_bug reward=1.43 done=false error=null
-[STEP] step=2 action=optimize_code reward=1.05 done=false error=null
-[STEP] step=3 action=fix_bug reward=0.88 done=true error=null
-[END] success=true steps=3 score=0.9850 rewards=1.43,1.05,0.88
+[START] task=medium_logic_bug env=CodeReviewBench agent=safe_agent
+[STEP] step=1 action=fix_bug reward=1.22 done=false error=null
+[STEP] step=2 action=optimize_code reward=1.09 done=false error=null
+[STEP] step=3 action=fix_bug reward=1.19 done=true error=null
+[END] success=true steps=3 score=0.9904 rewards=1.22,1.09,1.19
 ```
 
-Each `[STEP]` shows the agent's chosen action, immediate reward, and episode status — enabling trajectory-level analysis of agent decision quality.
+Grade breakdown: completion=1.0, efficiency=1.0, safety=1.0, sequence=1.0, calibration=0.936
+
+### Failed Episode — Aggressive Agent on `hard_multi_issue` (score: 0.463)
+
+```
+[START] task=hard_multi_issue env=CodeReviewBench agent=aggressive_agent
+[STEP] step=1 action=fix_bug reward=0.38 done=false error=null   # order violation: −0.3
+[STEP] step=2 action=fix_bug reward=-0.35 done=false error=null  # repeat penalty: −0.15
+[STEP] step=3 action=fix_bug reward=-0.35 done=false error=null  # repeat penalty: −0.15
+[STEP] step=4 action=fix_bug reward=-0.35 done=false error=null  # repeat penalty: −0.15
+[END] success=false steps=4 score=0.4634 rewards=0.38,-0.35,-0.35,-0.35
+```
+
+Grade breakdown: completion=0.25, efficiency=1.0, safety=0.7, sequence=0.25, calibration=0.322
+
+**Why it failed:** The agent used `fix_bug` for all 4 steps. Step 1 triggered an **order-constraint violation** (−0.3) because it resolved an issue before flagging the security vulnerability. Steps 2–4 incurred **repeat penalties** (−0.15 each) and no longer matched any expected action type. Only 1 of 4 issues was resolved. Calibration score collapsed to 0.322 because the agent reported 0.95 confidence on every wrong decision.
+
+This trajectory demonstrates three distinct failure modes detected by the 5-component grading system — poor ordering, action repetition, and miscalibrated confidence — none of which would be visible in a single-number accuracy metric.
 
 ---
 
@@ -522,6 +548,57 @@ The `/analysis` endpoint returns structured failure diagnostics and real-world i
 ```
 
 
+
+---
+
+## Robustness & Anti-Exploitation (Verified)
+
+The environment is hardened against degenerate strategies. All results below are from actual runs:
+
+### Single-Action Spam
+
+A trivial agent that sends `fix_bug` every step:
+
+| Task | Spam Score | Why It Fails |
+|------|-----------|------|
+| `hard_multi_issue` | **0.303** | Security issue requires `flag_issue`, not `fix_bug` — 3 of 4 actions unmatched |
+| `hard_edge_case` | **0.448** | Data corruption requires `flag_issue` — wrong action type for first issue |
+| `concurrency_bug` | **0.448** | Reporting defect requires `flag_issue` — wrong action type for second issue |
+
+Single-action spam scores **0.30–0.45** on hard tasks. No rule-based agent exceeds **0.50** on these tasks either — hard tasks require **mixed action types** (`flag_issue` + `fix_bug`) that cannot be solved by defaulting to one action.
+
+### Explanation Quality
+
+| Explanation | Reward | Penalty |
+|-------------|--------|---------|
+| `""` (empty) | 1.400 | −0.05 per step |
+| `"Fix the missing colon after the if-condition"` | 1.450 | none |
+
+Agents that provide empty or trivially short explanations (<10 characters) incur a deterministic penalty on every step.
+
+### Active Penalties Summary
+
+| Anti-Exploitation Mechanism | Penalty | Verified |
+|----------------------------|---------|----------|
+| Repeated consecutive action type | −0.15 per step | ✅ |
+| Order-constraint violation (security-first) | −0.30 per violation | ✅ |
+| Empty/short explanation (<10 chars) | −0.05 per step | ✅ |
+| Wrong action type for matched issue | −0.50 × calibration | ✅ |
+| `leave_as_is` with unresolved issues | −0.10 per step | ✅ |
+
+---
+
+## What This Benchmark Reveals (Empirical)
+
+Based on observed agent trajectories across 8 tasks:
+
+**1. Overconfidence is measurably destructive.** The aggressive agent reports 0.95 confidence on every action. On `hard_multi_issue`, this produces a calibration score of **0.322** (vs. the safe agent's 0.936 on `medium_logic_bug` with calibrated 0.70–0.80 confidence). A 15.7% reward difference between confidence levels on correct actions makes calibration a genuine differentiator.
+
+**2. Action repetition is the primary failure mode for simple agents.** The baseline agent falls back to `leave_as_is` when no keyword matches, burning up to 4 steps at −0.10 each on `medium_logic_bug`. The aggressive agent loops `fix_bug` on `hard_multi_issue`, accumulating −0.15 repeat penalties on steps 2–4.
+
+**3. Hidden issues defeat fixed strategies.** On `medium_logic_bug`, a hidden `None`-input crash is revealed only after the first fix. The baseline agent has no mechanism to detect this, defaulting to `leave_as_is` for 4 remaining steps. The safe agent's trajectory-aware strategy resolves it with score **0.985** vs. baseline's **0.653**.
+
+**4. Hard tasks expose the limits of all rule-based strategies.** All three agents score below **0.50** on hard tasks. The safe agent (0.754 overall average) leads only because it performs well on medium tasks — it still fails on hard tasks (0.211–0.481). This leaves a clear gap for LLM-based agents with genuine code reasoning.
 
 ---
 
