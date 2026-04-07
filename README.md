@@ -747,6 +747,62 @@ This tests whether agents rely on brittle keyword matching or robust semantic un
 
 ---
 
+## OpenEnv Evaluation Criteria Mapping
+
+How CodeReviewBench addresses each official evaluation criterion:
+
+### Real-World Utility (30%)
+- Models a **genuine software engineering workflow** — code review is a high-demand, high-stakes activity performed daily by millions of developers
+- Evaluates capabilities directly relevant to AI coding assistants (Copilot, Cursor, CodeRabbit): bug identification, fix prioritization, confidence calibration
+- Partial observability and hidden issue mechanics mirror real review scenarios where fixing one bug reveals another
+- 5-component grading provides **actionable diagnostic feedback**, not just a pass/fail score
+
+### Task & Grader Quality (25%)
+- **8 tasks** across 3 difficulty levels (easy, medium, hard) with verified difficulty progression
+- Grader outputs ∈ [0.0, 1.0] — verified range: [0.118, 0.994]
+- Fully **deterministic** — verified: identical trajectories produce score 0.7811 across 3 runs
+- Hard tasks genuinely challenge all strategies — best rule-based agent scores **0.211–0.481** on hard tasks
+
+### Environment Design (20%)
+- Clean `reset()` with task isolation; `RuntimeError` on invalid state transitions
+- 4-action space with typed Pydantic models and documented enum values
+- **Dense reward shaping**: 8 distinct reward signals (correct/wrong action, sequence bonus, order penalty, repeat penalty, explanation penalty, calibration, efficiency bonus)
+- Proper episode termination: all-resolved OR max-steps, with `done` flag and termination reason
+
+### Code Quality & Spec Compliance (15%)
+- Follows OpenEnv spec: `/reset`, `/step`, `/grader`, `/tasks`, `/state` endpoints
+- Docker builds on `python:3.11-slim`, port 7860, healthcheck included
+- `inference.py` outputs **only** `[START]`, `[STEP]`, `[END]` to stdout (all other prints DEBUG-guarded or stderr)
+- 7 integration tests covering all 8 tasks, determinism, error handling, and hidden issue reveal
+- Pydantic models with typed enums throughout
+
+### Creativity & Novelty (10%)
+- **Confidence calibration as a scoring component** — novel in OpenEnv environments
+- **Hidden issue reveal mechanic** — mid-episode partial observability evolution
+- **Explanation quality penalty** — incentivizes reasoning, not just action selection
+- **Trajectory-aware observation feedback** — hints adapt based on agent's mistakes
+- **Multi-agent failure diagnosis** — explains *why* agents fail, not just *that* they fail
+
+---
+
+## Limitations & Future Work
+
+We acknowledge the following limitations honestly:
+
+1. **No real code execution.** The environment pattern-matches action types against expected actions — it does not compile, run, or verify code changes. A future version could integrate a sandboxed execution engine to validate fixes.
+
+2. **Fixed task set (8 tasks).** All tasks are hand-authored with static code snippets. There is no procedural generation, which limits generalization evaluation. Future work could template-generate tasks from real GitHub PRs.
+
+3. **Action-type level matching.** Issue resolution matches on `action_type` (e.g., `fix_bug`), not on the specific fix applied. Two different bugs both expecting `fix_bug` are resolved in first-match order. Finer-grained action targeting would strengthen the evaluation signal.
+
+4. **Toy-scale code snippets.** Code under review is 5–15 lines. Real code review operates on files with imports, classes, and cross-module dependencies. Scaling to realistic file sizes is a natural next step.
+
+5. **Explanation evaluation is shallow.** The current penalty checks only explanation length (<10 characters), not semantic quality. A future version could use keyword overlap with issue descriptions for a lightweight quality signal without adding NLP dependencies.
+
+These limitations are structural design choices made to prioritize **determinism, reproducibility, and deployment simplicity** within the hackathon scope. Each is addressable in future iterations without changing the core API contract.
+
+---
+
 ## 11. Conclusion
 
 CodeReviewBench provides a **structured, deterministic, extensible, and diagnostically rich** evaluation framework for AI agents in sequential decision-making settings. By grounding evaluation in realistic software engineering workflows, it measures capabilities that matter in practice — diagnostic reasoning, strategic prioritization, calibrated decision-making, and adaptive planning under partial observability.
