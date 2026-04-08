@@ -15,7 +15,7 @@ Exposes the following endpoints:
 
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel, Field
 
 from models import Action, Observation, StepResult, EnvironmentState
@@ -51,7 +51,7 @@ env = CodeReviewEnv()
 # ──────────────────────────────────────────────────────────────────────────────
 
 class ResetRequest(BaseModel):
-    task_id: str = Field(..., description="ID of the task to start.")
+    task_id: str = Field(default="easy_syntax_bug", description="ID of the task to start.")
 
 
 class GraderRequest(BaseModel):
@@ -146,7 +146,7 @@ def _make_agent_summary(run_data: dict, analysis: dict, impact: dict) -> dict:
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/reset", response_model=Observation)
-def reset(req: ResetRequest):
+def reset(req: ResetRequest = Body(default=ResetRequest())):
     """Start a new episode for the given task."""
     try:
         obs = env.reset(req.task_id)
