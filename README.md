@@ -37,7 +37,7 @@ Most AI benchmarks are single-step. CodeReviewBench is not.
 | ---------------- | ----- | ----------- | -------------- | ------------ | ----------- | ---------- | ---------------- | ----------- | ------- |
 | `safe_agent`     | 0.984 | 0.985       | **0.988**      | 0.211        | 0.481       | 0.982      | 0.921            | 0.481       | **0.754** |
 | `baseline`       | 0.929 | 0.653       | 0.999          | 0.228        | 0.448       | 0.999      | 0.597            | 0.448       | 0.662   |
-| `aggressive`     | 1.000 | 1.000       | 0.588          | 0.315        | 0.438       | 0.379      | 0.588            | 0.438       | 0.593   |
+| `aggressive`     | 0.998 | 0.998       | 0.588          | 0.315        | 0.438       | 0.379      | 0.588            | 0.438       | 0.588   |
 
 Key insight: **easy tasks don't differentiate agents** — safety-critical and multi-step tasks do. Hard tasks (`hard_multi_issue`, `hard_edge_case`, `concurrency_bug`) require mixed action types and strategic sequencing — all three agents score below 0.50 on these, demonstrating genuine difficulty. The safe agent leads overall at **0.754** through better prioritization on medium tasks.
 
@@ -361,7 +361,7 @@ A batch processing module with:
 | **Sequence** | 20% | LCS(expected, actual) / len(expected) | [0, 1] |
 | **Calibration** | 15% | `1 − mean(cal_error²)` where cal_error is confidence-correctness mismatch | [0, 1] |
 
-**Final score** = weighted sum, clamped to **[0.0, 1.0]**.
+**Final score** = weighted sum, strictly clamped to **(0.001, 0.999)** to comply with OpenEnv evaluation constraints — scores of exactly 0.0 or 1.0 are never returned.
 
 Properties:
 - **Deterministic** — identical trajectories always produce identical scores
@@ -620,7 +620,7 @@ CodeReviewBench includes a **comparative evaluation mode** running multiple agen
 |-------|------|------|------|------|------|-----|-----|------|-------------|
 | `safe_agent` | 0.984 | 0.985 | **0.988** | 0.211 | 0.481 | 0.982 | 0.921 | 0.481 | **0.754** ◀ BEST |
 | `baseline` | 0.929 | 0.653 | 0.999 | 0.228 | 0.448 | 0.999 | 0.597 | 0.448 | 0.662 |
-| `aggressive_agent` | 1.000 | 1.000 | 0.588 | 0.315 | 0.438 | 0.379 | 0.588 | 0.438 | 0.593 |
+| `aggressive_agent` | 0.998 | 0.998 | 0.588 | 0.315 | 0.438 | 0.379 | 0.588 | 0.438 | 0.588 |
 
 *†Med = medium difficulty tasks with different focus areas*
 
@@ -690,7 +690,7 @@ The dynamic difficulty adjustment system progressively tests agent capabilities:
 | Agent | Round 1 | Round 2 | Round 3 | Final Level |
 |-------|---------|---------|---------|-------------|
 | `safe_agent` | easy → 0.984 | medium → 0.985 | hard → 0.211 | **medium** (demoted) |
-| `aggressive_agent` | easy → 1.000 | medium → 1.000 | hard → 0.315 | **medium** (demoted) |
+| `aggressive_agent` | easy → 0.998 | medium → 0.998 | hard → 0.315 | **medium** (demoted) |
 | `baseline` | easy → 0.929 | medium → 0.653 | medium → 0.653 | **medium** (plateaued) |
 
 Hard tasks now genuinely challenge all agent strategies — no rule-based agent sustains performance at the highest difficulty level.
@@ -759,7 +759,7 @@ How CodeReviewBench addresses each official evaluation criterion:
 
 ### Task & Grader Quality (25%)
 - **8 tasks** across 3 difficulty levels (easy, medium, hard) with verified difficulty progression
-- Grader outputs ∈ [0.0, 1.0] — verified range: [0.118, 0.994]
+- Grader outputs strictly in **(0.001, 0.999)** — verified range: [0.118, 0.994]; final scores are clamped to avoid boundary values
 - Fully **deterministic** — verified: identical trajectories produce score 0.7811 across 3 runs
 - Hard tasks genuinely challenge all strategies — best rule-based agent scores **0.211–0.481** on hard tasks
 
