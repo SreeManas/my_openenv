@@ -1928,3 +1928,386 @@ TASK_REGISTRY.update({
     "concurrency_bug": CONC_TASK,
 })
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TASK 9 — HARD: Production Incident Response
+# Simulates a real on-call triage scenario.
+# Baseline should score ≈ 0.55–0.70 because:
+#   - CRITICAL issues have misleading hints (look like perf, not memory)
+#   - Hidden error-handling issue revealed only after cache fixed
+#   - Order constraint: fix cache leak before fixing race condition
+#   - Wrong ordering (e.g., fix race first) triggers penalty
+# ══════════════════════════════════════════════════════════════════════════════
+
+PROD_CODE_VERSIONS: Dict[frozenset, str] = {
+    # ── Initial: all 5 bugs present ─────────────────────────────────────────
+    _key(): (
+        "import threading\n"
+        "import logging\n"
+        "\n"
+        "_cache = {}          # Module-level cache — never evicted\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0   # Shared counter — no lock\n"
+        "\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record, using an in-memory cache."""\n'
+        "    if user_id in _cache:\n"
+        "        return _cache[user_id]\n"
+        "    # N+1: fetches preferences in a separate loop\n"
+        "    user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "    prefs = [db.query(f'SELECT * FROM prefs WHERE key={k}')\n"
+        "             for k in user['pref_keys']]\n"
+        "    user['prefs'] = prefs\n"
+        "    _cache[user_id] = user\n"
+        "    logging.info(f'Loaded user {user_id}: {user}')  # Logs PII\n"
+        "    return user\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request."""\n'
+        "    global _request_count\n"
+        "    _request_count += 1  # Race condition — not thread-safe\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── Cache fix applied (LRU eviction, max 1000 entries) ──────────────────
+    _key("prod_cache_01"): (
+        "import threading\n"
+        "from functools import lru_cache\n"
+        "import logging\n"
+        "\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "@lru_cache(maxsize=1000)\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record, using a bounded LRU cache."""\n'
+        "    user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "    prefs = [db.query(f'SELECT * FROM prefs WHERE key={k}')\n"
+        "             for k in user['pref_keys']]\n"
+        "    user['prefs'] = prefs\n"
+        "    logging.info(f'Loaded user {user_id}: {user}')  # Still logs PII\n"
+        "    return user\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request."""\n'
+        "    global _request_count\n"
+        "    _request_count += 1  # Race condition remains\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── Race condition fixed (thread-safe counter) ───────────────────────────
+    _key("prod_race_01"): (
+        "import threading\n"
+        "import logging\n"
+        "\n"
+        "_cache = {}\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record, using an in-memory cache."""\n'
+        "    if user_id in _cache:\n"
+        "        return _cache[user_id]\n"
+        "    user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "    prefs = [db.query(f'SELECT * FROM prefs WHERE key={k}')\n"
+        "             for k in user['pref_keys']]\n"
+        "    user['prefs'] = prefs\n"
+        "    _cache[user_id] = user\n"
+        "    logging.info(f'Loaded user {user_id}: {user}')  # Still logs PII\n"
+        "    return user\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request — thread-safe counter."""\n'
+        "    with _lock:\n"
+        "        _request_count += 1\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── N+1 query fixed (batch fetch) ────────────────────────────────────────
+    _key("prod_query_01"): (
+        "import threading\n"
+        "import logging\n"
+        "\n"
+        "_cache = {}\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record with batched preference lookup."""\n'
+        "    if user_id in _cache:\n"
+        "        return _cache[user_id]\n"
+        "    user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "    prefs = db.query_many('SELECT * FROM prefs WHERE key IN (?)',\n"
+        "                          user['pref_keys'])\n"
+        "    user['prefs'] = prefs\n"
+        "    _cache[user_id] = user\n"
+        "    logging.info(f'Loaded user {user_id}: {user}')  # Still logs PII\n"
+        "    return user\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request."""\n'
+        "    global _request_count\n"
+        "    _request_count += 1  # Race condition remains\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── Cache + race fixed ───────────────────────────────────────────────────
+    _key("prod_cache_01", "prod_race_01"): (
+        "import threading\n"
+        "from functools import lru_cache\n"
+        "import logging\n"
+        "\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "@lru_cache(maxsize=1000)\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record with bounded LRU cache."""\n'
+        "    user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "    prefs = [db.query(f'SELECT * FROM prefs WHERE key={k}')\n"
+        "             for k in user['pref_keys']]\n"
+        "    user['prefs'] = prefs\n"
+        "    logging.info(f'Loaded user {user_id}: {user}')  # Still logs PII\n"
+        "    return user\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request — thread-safe."""\n'
+        "    with _lock:\n"
+        "        _request_count += 1\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── Cache + race + N+1 fixed ────────────────────────────────────────────
+    _key("prod_cache_01", "prod_race_01", "prod_query_01"): (
+        "import threading\n"
+        "from functools import lru_cache\n"
+        "import logging\n"
+        "\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "@lru_cache(maxsize=1000)\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record with bounded cache and batched queries."""\n'
+        "    user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "    prefs = db.query_many('SELECT * FROM prefs WHERE key IN (?)',\n"
+        "                          user['pref_keys'])\n"
+        "    user['prefs'] = prefs\n"
+        "    logging.info(f'Loaded user {user_id}: {user}')  # Still logs PII\n"
+        "    return user\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request — thread-safe."""\n'
+        "    with _lock:\n"
+        "        _request_count += 1\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── Cache + race + error handling fixed ─────────────────────────────────
+    _key("prod_cache_01", "prod_race_01", "prod_errors_01"): (
+        "import threading\n"
+        "from functools import lru_cache\n"
+        "import logging\n"
+        "\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "@lru_cache(maxsize=1000)\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record with bounded LRU cache and error handling."""\n'
+        "    try:\n"
+        "        user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "        if user is None:\n"
+        "            raise ValueError(f'User {user_id} not found')\n"
+        "        prefs = [db.query(f'SELECT * FROM prefs WHERE key={k}')\n"
+        "                 for k in user['pref_keys']]\n"
+        "        user['prefs'] = prefs\n"
+        "        logging.info(f'Loaded user {user_id}: {user}')  # Still logs PII\n"
+        "        return user\n"
+        "    except Exception as e:\n"
+        "        logging.error(f'Failed to load user {user_id}: {e}')\n"
+        "        raise\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request — thread-safe."""\n'
+        "    with _lock:\n"
+        "        _request_count += 1\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+
+    # ── ALL resolved (ideal — stable, fast, safe, observable) ───────────────
+    _key("prod_cache_01", "prod_race_01", "prod_query_01",
+         "prod_errors_01", "prod_pii_01"): (
+        "import threading\n"
+        "from functools import lru_cache\n"
+        "import logging\n"
+        "\n"
+        "_lock = threading.Lock()\n"
+        "_request_count = 0\n"
+        "\n"
+        "@lru_cache(maxsize=1000)\n"
+        "def get_user_data(user_id, db):\n"
+        '    """Fetch user record: bounded cache, batched queries, safe logging."""\n'
+        "    try:\n"
+        "        user = db.query(f'SELECT * FROM users WHERE id={user_id}')\n"
+        "        if user is None:\n"
+        "            raise ValueError(f'User {user_id} not found')\n"
+        "        prefs = db.query_many('SELECT * FROM prefs WHERE key IN (?)',\n"
+        "                              user['pref_keys'])\n"
+        "        user['prefs'] = prefs\n"
+        "        logging.info(f'Loaded user {user_id} successfully')  # No PII\n"
+        "        return user\n"
+        "    except Exception as e:\n"
+        "        logging.error(f'Failed to load user {user_id}: {type(e).__name__}')\n"
+        "        raise\n"
+        "\n"
+        "def handle_request(user_id, db):\n"
+        '    """Handle an incoming API request — thread-safe, instrumented."""\n'
+        "    with _lock:\n"
+        "        _request_count += 1\n"
+        "    return get_user_data(user_id, db)\n"
+    ),
+}
+
+PROD_TASK: Dict[str, Any] = {
+    "task_id": "production_incident_response",
+    "difficulty": "hard",
+    "context": (
+        "This service is running in production and experiencing intermittent failures. "
+        "Users report slow responses, occasional crashes, and inconsistent outputs. "
+        "Monitoring shows increasing memory usage over time, suggesting a potential memory leak. "
+        "Error logs indicate race conditions in concurrent request handling. "
+        "Prioritize the most critical issues first to stabilize the system."
+    ),
+    "issues": [
+        {
+            "id": "prod_cache_01",
+            "type": "memory_leak",
+            # Hint is deliberately vague — 'growing memory' doesn't say 'unbounded dict'
+            "hint": (
+                "Memory usage climbs steadily over time and never drops, even during "
+                "low-traffic periods. Heap profiling shows a module-level object growing "
+                "without bound — entries are added but nothing is ever evicted."
+            ),
+            "description": (
+                "_cache is a plain dict with no eviction policy. "
+                "Every unique user_id is stored permanently, causing the process to "
+                "consume ever-increasing memory and eventually OOM in production."
+            ),
+            "expected_action": "fix_bug",
+            "severity": 1.0,
+            "priority_gate": True,
+            "impact": (
+                "OOM crash — process memory grows without bound, causing pod restarts "
+                "and cascading failures across the service mesh"
+            ),
+        },
+        {
+            "id": "prod_race_01",
+            "type": "concurrency",
+            # Hint sounds like a metrics bug, not obviously a race
+            "hint": (
+                "Request counter metrics are occasionally lower than expected under "
+                "high concurrency. The discrepancy is non-deterministic and disappears "
+                "under sequential load — suggesting a thread-safety issue in the "
+                "counter update path."
+            ),
+            "description": (
+                "_request_count += 1 is a read-modify-write operation that is not "
+                "atomic in CPython under multi-threading. The GIL does not protect "
+                "compound operations, so concurrent increments silently drop counts."
+            ),
+            "expected_action": "flag_issue",
+            "severity": 0.85,
+            "impact": (
+                "Data corruption under load — metrics undercount requests, masking "
+                "traffic spikes and breaking SLA alerting thresholds"
+            ),
+        },
+        {
+            "id": "prod_query_01",
+            "type": "performance",
+            "hint": (
+                "Database connection pool is saturated during peak traffic. "
+                "Query logs show hundreds of nearly identical SELECT statements "
+                "firing in sequence for a single user record fetch — the number "
+                "of queries scales with the user's preference count."
+            ),
+            "description": (
+                "N+1 query pattern: one query per preference key inside a list "
+                "comprehension. A user with 50 preferences triggers 51 DB round-trips "
+                "per cache miss, exhausting the connection pool under load."
+            ),
+            "expected_action": "optimize_code",
+            "severity": 0.75,
+            "impact": (
+                "Latency p99 spikes — each cache miss triggers O(n) DB queries, "
+                "causing connection pool exhaustion and cascading timeouts"
+            ),
+        },
+        {
+            "id": "prod_errors_01",
+            "type": "edge_case",
+            # Hidden — revealed after cache fix is applied
+            "hint": (
+                "On-call reports show unhandled exceptions bubbling up to the load "
+                "balancer when a user_id is valid but the record has been deleted. "
+                "The stack trace shows a NoneType error deep in preference processing "
+                "— the function does not guard against a missing user record."
+            ),
+            "description": (
+                "get_user_data has no try/except. If db.query returns None (deleted "
+                "user) or raises a transient DB error, the exception propagates "
+                "uncaught through handle_request and crashes the worker thread."
+            ),
+            "expected_action": "fix_bug",
+            "severity": 0.65,
+            "hidden": True,  # Revealed after prod_cache_01 is resolved
+            "impact": (
+                "Worker crash on deleted users — unhandled None propagates to the "
+                "request handler, returning 500 errors and killing the thread"
+            ),
+        },
+        {
+            "id": "prod_pii_01",
+            "type": "security",
+            "hint": (
+                "A security audit flagged that full user objects — including email "
+                "addresses, phone numbers, and preference values — are emitted to "
+                "application logs at INFO level on every cache miss. These logs are "
+                "shipped to a third-party aggregator without field-level redaction."
+            ),
+            "description": (
+                "logging.info(f'Loaded user {user_id}: {user}') serialises the entire "
+                "user dict including PII fields. This violates GDPR data minimisation "
+                "requirements and creates a compliance liability."
+            ),
+            "expected_action": "flag_issue",
+            "severity": 0.6,
+            "impact": (
+                "GDPR violation — full user PII written to log aggregators, "
+                "creating regulatory exposure and potential data breach liability"
+            ),
+        },
+    ],
+    "expected_sequence": ["fix_bug", "flag_issue", "optimize_code", "fix_bug", "flag_issue"],
+    "code_versions": PROD_CODE_VERSIONS,
+    "max_steps": 8,
+    "order_constraints": {
+        "prod_cache_01": {
+            "must_before": ["prod_race_01"],
+            "violation_penalty": -0.3,
+            "reason": (
+                "The race condition in the counter is masked by the memory leak "
+                "dominating metrics. Fixing the race before eliminating the unbounded "
+                "cache addresses a symptom while the root cause continues to crash pods."
+            ),
+        },
+    },
+}
+
+TASK_REGISTRY.update({
+    "production_incident_response": PROD_TASK,
+})
+
+
