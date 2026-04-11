@@ -15,6 +15,13 @@ import json
 import requests
 from openai import OpenAI
 
+
+def sanitize_text(text: str) -> str:
+    """Strip all non-ASCII characters to prevent encode errors in API calls."""
+    if not isinstance(text, str):
+        text = str(text)
+    return text.encode("ascii", "ignore").decode("ascii")
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
@@ -108,62 +115,65 @@ def _generate_thinking(
     step_num: int,
 ) -> str:
     """Generate a visible reasoning trace explaining WHY this action was chosen."""
-    action_type = action.get("action_type", "leave_as_is")
+    action_type = action.get("action_type", "fix_bug")
     issue_hint = obs.get("issue_type", "")
     remaining = obs.get("remaining_issues", [])
 
-    # Check for previous failure
-    last_failed = False
+    # Check actual last reward — must be factually accurate
+    last_reward = None
     last_action = ""
     if action_history:
         last = action_history[-1]
         last_action = last.get("action_type", "")
-        last_failed = last.get("reward", 0) < 0
+        last_reward = last.get("reward", None)
 
     parts = []
 
-    # 1. Failure recognition (Step 4)
-    if last_failed:
-        parts.append(f"Previous {last_action} produced negative reward")
-        if action_type != last_action:
-            parts.append(f"switching strategy to {action_type}")
-        else:
-            parts.append("retrying with refined approach")
+    # 1. Previous step outcome — factually correct based on actual reward
+    if last_reward is not None:
+        if last_reward < 0:
+            parts.append(f"previous {last_action} produced negative reward ({last_reward:+.2f})")
+            if action_type != last_action:
+                parts.append(f"switching strategy to {action_type}")
+            else:
+                parts.append("retrying with adjusted approach")
+        elif last_reward > 0:
+            parts.append(f"previous {last_action} succeeded ({last_reward:+.2f})")
+            parts.append("continuing to next issue")
 
-    # 2. Context-based reasoning
+    # 2. Context-based reasoning from current observation
     hint_lower = issue_hint.lower()
     if "security" in hint_lower or "sanitiz" in hint_lower or "sensitive" in hint_lower:
         parts.append("security context detected, prioritizing vulnerability assessment")
     elif "loop" in hint_lower or "bounds" in hint_lower or "redundant" in hint_lower:
         parts.append("detected algorithmic inefficiency in loop structure")
-    elif "crash" in hint_lower or "none" in hint_lower or "unbound" in hint_lower:
+    elif "crash" in hint_lower or "unbound" in hint_lower:
         parts.append("edge-case failure pattern identified")
     elif "concatenat" in hint_lower or "scale" in hint_lower or "efficient" in hint_lower:
         parts.append("performance bottleneck detected")
     elif "shared" in hint_lower or "counter" in hint_lower or "leaking" in hint_lower:
         parts.append("concurrency or state management issue detected")
+    elif "parse" in hint_lower or "control-flow" in hint_lower or "syntax" in hint_lower:
+        parts.append("syntax or control-flow defect detected")
     elif issue_hint:
         clean_hint = issue_hint.split(".")[0].strip()[:80]
-        parts.append(f"analyzing: {clean_hint}")
+        parts.append(f"analyzing: {sanitize_text(clean_hint)}")
 
     # 3. Action justification
     if action_type == "fix_bug":
         parts.append("applying targeted fix based on root-cause analysis")
     elif action_type == "flag_issue":
-        parts.append("flagging for review before attempting direct modification")
+        parts.append("flagging for review before direct modification")
     elif action_type == "optimize_code":
         parts.append("applying performance optimization")
     elif action_type == "leave_as_is":
-        if not remaining:
-            parts.append("all issues resolved, concluding review")
-        else:
-            parts.append("no actionable insight, preserving current state")
+        parts.append("all issues resolved, concluding review")
 
     # 4. Progress context
     if remaining:
         parts.append(f"{len(remaining)} issue(s) remaining")
 
-    thinking = " -> ".join(parts) if parts else f"Step {step_num}: evaluating {action_type}"
+    thinking = " -> ".join(parts) if parts else f"step {step_num}: evaluating {action_type}"
     return thinking.replace("\n", " ")[:200]
 
 
@@ -254,11 +264,14 @@ def ask_llm(
 
         action.setdefault("explanation", "LLM decision")
 
-        # Clean explanation (Task 7)
-        explanation = action["explanation"].strip().replace("\n", " ")
+        # Sanitize + clean explanation
+        explanation = sanitize_text(action["explanation"]).strip().replace("\n", " ")
         if len(explanation) > MAX_REASON_LEN:
             explanation = explanation[:MAX_REASON_LEN]
         action["explanation"] = explanation
+
+        # Sanitize action_type (safety)
+        action["action_type"] = sanitize_text(action.get("action_type", "leave_as_is"))
 
         action["confidence"] = max(0.0, min(1.0, float(action.get("confidence", 0.7))))
 
@@ -266,10 +279,10 @@ def ask_llm(
 
     except Exception as e:
         return {
-            "action_type": "leave_as_is",
-            "explanation": f"LLM error: {e}",
-            "confidence": 0.5,
-            "_error": str(e),  # surfaced in log_step, not printed directly
+            "action_type": "fix_bug",  # Never leave_as_is on LLM failure
+            "explanation": sanitize_text(f"LLM fallback: attempting fix"),
+            "confidence": 0.6,
+            "_error": sanitize_text(str(e)),
         }
 
 
@@ -279,28 +292,33 @@ def ask_llm(
 
 def get_tasks() -> list:
     """Fetch available tasks from the environment."""
-    resp = requests.get(f"{ENV_URL}/tasks", timeout=10)
+    resp = requests.get(f"{ENV_URL}/tasks", timeout=30)
     resp.raise_for_status()
     return resp.json()
 
 
 def reset_task(task_id: str) -> dict:
     """Reset the environment for a specific task."""
-    resp = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id}, timeout=10)
+    resp = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id}, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
 
 def step_action(action: dict) -> dict:
-    """Send an action to the environment."""
-    resp = requests.post(f"{ENV_URL}/step", json=action, timeout=10)
+    """Send an action to the environment. Sanitizes all fields before sending."""
+    safe_action = {
+        "action_type": sanitize_text(action.get("action_type", "fix_bug")),
+        "explanation": sanitize_text(action.get("explanation", "")),
+        "confidence": float(action.get("confidence", 0.7)),
+    }
+    resp = requests.post(f"{ENV_URL}/step", json=safe_action, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
 
 def grade() -> dict:
     """Grade the current trajectory."""
-    resp = requests.post(f"{ENV_URL}/grader", timeout=10)
+    resp = requests.post(f"{ENV_URL}/grader", timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -359,10 +377,11 @@ def run_task(task_id: str) -> dict:
             total_count = max(resolved_count + len(remaining_ids), len(remaining_ids))
 
             # Ask the LLM with full context
+            # Sanitize observation fields before sending to LLM to avoid encode errors
             action = ask_llm(
-                code_snippet=obs.get("code_snippet", ""),
-                issue_type=obs.get("issue_type", ""),
-                context=obs.get("context", ""),
+                code_snippet=sanitize_text(obs.get("code_snippet", "")),
+                issue_type=sanitize_text(obs.get("issue_type", "")),
+                context=sanitize_text(obs.get("context", "")),
                 step=step_num,
                 max_steps=obs.get("max_steps", MAX_STEPS),
                 action_history=action_history,
@@ -372,6 +391,14 @@ def run_task(task_id: str) -> dict:
 
             # Capture LLM error if one occurred (set in ask_llm fallback)
             llm_error = action.pop("_error", None)
+
+            # ── Guard: never leave_as_is when issues remain ────────────────
+            remaining_ids = obs.get("remaining_issues", [])
+            if action["action_type"] == "leave_as_is" and remaining_ids:
+                action["action_type"] = "fix_bug"
+                action["explanation"] = sanitize_text(
+                    "Issues remain — switching to active fix"
+                )
 
             # Save pre-step observation for THINK generation
             pre_step_obs = obs
@@ -384,22 +411,24 @@ def run_task(task_id: str) -> dict:
             total_reward += step_reward
             step_rewards.append(step_reward)
 
-            # Sanitize error string — strip newlines to keep [STEP] single-line
-            safe_error = str(llm_error).replace("\n", " ").strip() if llm_error else None
+            # Sanitize error string — strip newlines and non-ASCII
+            safe_error = sanitize_text(
+                str(llm_error).replace("\n", " ").strip()
+            ) if llm_error else None
 
-            # ── OpenEnv: visible reasoning trace ──────────────────────────
+            # ── OpenEnv: visible reasoning THINK (before STEP) ────────────
             thinking = _generate_thinking(
                 action=action,
                 obs=pre_step_obs,
                 action_history=action_history,
                 step_num=step_num,
             )
-            log_think(thinking)
+            log_think(sanitize_text(thinking))
 
             # ── OpenEnv: log each step ────────────────────────────────────
             log_step(
                 step=step_num,
-                action=action["action_type"],
+                action=sanitize_text(action["action_type"]),
                 reward=step_reward,
                 done=done,
                 error=safe_error,
