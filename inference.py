@@ -96,35 +96,46 @@ def analyze_context(context: str, issue_type: str = "") -> str:
 def get_all_available_tasks() -> list:
     """Dynamically discover all task IDs.
 
-    Priority:
-    1. Fetch from the live /tasks endpoint (always up-to-date, picks up new tasks)
-    2. Fall back to tasks.py TASK_REGISTRY (works without a running server)
+    Merges results from the live /tasks endpoint AND the local TASK_REGISTRY
+    so that newly added tasks always appear, even if the server image is stale.
     """
+    api_ids = []
     try:
         resp = requests.get(f"{ENV_URL}/tasks", timeout=15)
         resp.raise_for_status()
         tasks = sanitize_dict(resp.json())
         if tasks and isinstance(tasks, list):
-            ids = [
+            api_ids = [
                 t["task_id"] if isinstance(t, dict) else t
                 for t in tasks
             ]
-            if ids:
-                return ids
     except Exception:
-        pass  # Fall through to local registry
+        pass
 
-    # Local fallback — import TASK_REGISTRY directly from tasks.py
+    # Local registry (picks up tasks added to tasks.py but not yet deployed)
+    local_ids = []
     try:
         from tasks import TASK_REGISTRY  # type: ignore
-        return list(TASK_REGISTRY.keys())
+        local_ids = list(TASK_REGISTRY.keys())
     except Exception:
-        # Last resort: known static list
-        return [
-            "easy_syntax_bug", "medium_logic_bug", "hard_multi_issue",
-            "security_review", "data_validation_pipeline", "concurrency_bug",
-            "production_incident_response",
-        ]
+        pass
+
+    # Merge: API order first, then any local-only tasks appended at the end
+    merged = list(api_ids)
+    for tid in local_ids:
+        if tid not in merged:
+            merged.append(tid)
+
+    if merged:
+        return merged
+
+    # Last resort
+    return [
+        "easy_syntax_bug", "medium_logic_bug", "hard_multi_issue",
+        "security_review", "data_validation_pipeline", "concurrency_bug",
+        "production_incident_response",
+    ]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
@@ -571,6 +582,15 @@ def _select_adaptive_action(
     return available[0], f"{llm_action} unavailable, using {available[0]}"
 
 
+# ── Cross-episode memory ─────────────────────────────────────────────────────
+# Persists Q-values and bans across tasks so that feedback from episode N
+# actually influences action selection in episode N+1.
+_global_memory = {
+    "action_scores": {},     # action -> cumulative Q-value (persists)
+    "banned_actions": set(), # actions banned due to poor episode scores
+}
+
+
 def run_task(task_id: str) -> dict:
     """Run the LLM agent on a single task with adaptive episode memory."""
     # ── OpenEnv: announce start of episode ───────────────────────────────
@@ -583,17 +603,18 @@ def run_task(task_id: str) -> dict:
     final_score = 0.0
     steps_used = 0
 
-    # ── Episode memory for adaptive policy ────────────────────────────
+    # ── Episode memory (seeded from cross-episode global memory) ──────
     memory = {
-        "failed_actions": set(),     # actions that produced negative reward
-        "banned_actions": set(),     # actions that failed 2+ times
-        "successful_actions": set(), # actions that produced positive reward
+        "failed_actions": set(),
+        "banned_actions": set(_global_memory["banned_actions"]),  # inherit bans
+        "successful_actions": set(),
         "last_action": None,
         "last_reward": None,
-        "fail_counts": {},           # action -> count of failures
-        "_override_reason": "",      # passed to THINK generation
-        "action_scores": {},         # lightweight Q-value: action -> cumulative reward
+        "fail_counts": {},
+        "_override_reason": "",
+        "action_scores": dict(_global_memory["action_scores"]),   # inherit Q-values
     }
+
 
     try:
         for step_num in range(1, MAX_STEPS + 1):
@@ -711,6 +732,9 @@ def run_task(task_id: str) -> dict:
             if final_score < 0.6 and memory["last_action"]:
                 memory["banned_actions"].add(memory["last_action"])
 
+        # ── Write back to cross-episode global memory ─────────────────
+        _global_memory["action_scores"].update(memory["action_scores"])
+        _global_memory["banned_actions"] = set(memory["banned_actions"])
 
     except Exception as exc:
         step_num = len(step_rewards) + 1
