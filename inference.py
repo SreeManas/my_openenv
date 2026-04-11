@@ -697,6 +697,21 @@ def run_task(task_id: str) -> dict:
         final_score = score.get("score", 0.0)
         steps_used = score.get("steps_used", 0)
 
+        # ── RL feedback: blend episode score into Q-values ────────────────
+        # Closes the loop: poor episode scores reduce Q-value of actions taken
+        # and soft-ban the last action so epsilon-greedy avoids repeating it.
+        if action_history:
+            for entry in action_history:
+                act = entry["action_type"]
+                # 70% step reward already recorded; add 30% episode-grade signal
+                memory["action_scores"][act] = (
+                    memory["action_scores"].get(act, 0.0) + 0.3 * final_score
+                )
+            # Soft-ban last action if episode quality is poor
+            if final_score < 0.6 and memory["last_action"]:
+                memory["banned_actions"].add(memory["last_action"])
+
+
     except Exception as exc:
         step_num = len(step_rewards) + 1
         safe_exc = sanitize_text(str(exc).replace("\n", " ").strip())
