@@ -22,6 +22,17 @@ def sanitize_text(text: str) -> str:
         text = str(text)
     return text.encode("ascii", "ignore").decode("ascii")
 
+
+def sanitize_dict(obj):
+    """Recursively sanitize all string values in a parsed JSON object."""
+    if isinstance(obj, dict):
+        return {k: sanitize_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_dict(v) for v in obj]
+    elif isinstance(obj, str):
+        return sanitize_text(obj)
+    return obj
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
@@ -301,11 +312,11 @@ def reset_task(task_id: str) -> dict:
     """Reset the environment for a specific task."""
     resp = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id}, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    return sanitize_dict(resp.json())  # sanitize ALL incoming strings (incl. code_snippet)
 
 
 def step_action(action: dict) -> dict:
-    """Send an action to the environment. Sanitizes all fields before sending."""
+    """Send an action to the environment. Sanitizes outgoing and incoming data."""
     safe_action = {
         "action_type": sanitize_text(action.get("action_type", "fix_bug")),
         "explanation": sanitize_text(action.get("explanation", "")),
@@ -313,14 +324,14 @@ def step_action(action: dict) -> dict:
     }
     resp = requests.post(f"{ENV_URL}/step", json=safe_action, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    return sanitize_dict(resp.json())  # sanitize ALL incoming strings (incl. code_snippet)
 
 
 def grade() -> dict:
     """Grade the current trajectory."""
     resp = requests.post(f"{ENV_URL}/grader", timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    return sanitize_dict(resp.json())
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -332,9 +343,9 @@ def log_start(task: str, env: str, model: str) -> None:
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error=None) -> None:
-    error_val = error if error else "null"
+    error_val = sanitize_text(error) if error else "null"  # sanitize error string
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error_val}",
+        f"[STEP] step={step} action={sanitize_text(action)} reward={reward:.2f} done={str(done).lower()} error={error_val}",
         flush=True,
     )
 
