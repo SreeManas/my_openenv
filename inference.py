@@ -255,10 +255,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error=None) -> N
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: list) -> None:
+def log_end(success: bool, steps: int, rewards: list) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.4f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
         flush=True,
     )
 
@@ -353,12 +353,10 @@ def run_task(task_id: str) -> dict:
         steps_used = step_num
 
     # ── OpenEnv: announce end of episode ─────────────────────────────────
-    # Clamp before logging: ensures score never formats as 1.00 or 0.00
     safe_score = min(0.999, max(0.001, final_score))
     log_end(
         success=safe_score > 0.5,
         steps=steps_used,
-        score=safe_score,
         rewards=step_rewards,
     )
 

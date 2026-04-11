@@ -372,11 +372,253 @@ class SafeAgent(Agent):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Agent 4: Adaptive — reward-based learning with anti-repetition
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Task-based strategy biases: prioritized action types per task category
+_TASK_STRATEGY = {
+    "security": [ActionType.FLAG_ISSUE, ActionType.FIX_BUG],
+    "performance": [ActionType.OPTIMIZE_CODE, ActionType.FIX_BUG],
+    "syntax": [ActionType.FIX_BUG, ActionType.OPTIMIZE_CODE],
+    "validation": [ActionType.FIX_BUG, ActionType.FLAG_ISSUE],
+    "concurrency": [ActionType.FIX_BUG, ActionType.FLAG_ISSUE],
+    "edge": [ActionType.FIX_BUG, ActionType.FLAG_ISSUE],
+}
+
+# Maps hint keywords to task categories for strategy selection
+_TASK_CATEGORY_HINTS = [
+    ("sanitiz", "security"), ("sensitive", "security"), ("predictable", "security"),
+    ("security", "security"), ("credential", "security"),
+    ("o(n", "performance"), ("efficient", "performance"), ("scale", "performance"),
+    ("sort", "performance"), ("concatenat", "performance"), ("lazy", "performance"),
+    ("parse", "syntax"), ("control-flow", "syntax"), ("well-formed", "syntax"),
+    ("malformed", "syntax"),
+    ("email", "validation"), ("cast", "validation"), ("payload", "validation"),
+    ("boundary", "edge"), ("none", "edge"), ("crash", "edge"), ("empty", "edge"),
+    ("mutable", "concurrency"), ("shared", "concurrency"), ("counter", "concurrency"),
+    ("leaking", "concurrency"), ("batch", "concurrency"),
+]
+
+
+class AdaptiveAgent(Agent):
+    """
+    Reward-adaptive agent with RL-like behavior.
+
+    Implements:
+      - Anti-repetition: forces action switch after consecutive failure
+      - Reward-based avoidance: avoids action types that produced negative reward
+      - Task-based strategy: biases action selection by inferred task category
+      - Calibrated confidence: adjusts based on past success rate
+
+    This agent maintains a step-by-step memory and adapts its behavior
+    within each episode — the core observe → act → reward → adapt loop.
+    """
+
+    def __init__(self) -> None:
+        self._avoid_actions: set = set()
+        self._last_action: str = ""
+        self._last_reward: float = 0.0
+        self._step_history: List[Dict[str, Any]] = []
+        self._task_category: str = ""
+
+    @property
+    def name(self) -> str:
+        return "adaptive_agent"
+
+    def reset_memory(self) -> None:
+        """Clear episode memory for a new task."""
+        self._avoid_actions = set()
+        self._last_action = ""
+        self._last_reward = 0.0
+        self._step_history = []
+        self._task_category = ""
+
+    def update(self, action_type: str, reward: float) -> None:
+        """Update internal state after receiving reward (the 'learn' step)."""
+        self._step_history.append({"action": action_type, "reward": reward})
+        self._last_action = action_type
+        self._last_reward = reward
+
+        # If negative reward → avoid this action type in future steps
+        if reward < 0:
+            self._avoid_actions.add(action_type)
+
+        # Safety valve: if all non-leave actions are blocked, reset
+        non_leave = {at.value for at in ActionType if at != ActionType.LEAVE_AS_IS}
+        if self._avoid_actions >= non_leave:
+            self._avoid_actions.clear()
+
+    def _infer_category(self, hint: str) -> str:
+        """Infer task category from the observation hint."""
+        hint_lower = hint.lower()
+        for keyword, category in _TASK_CATEGORY_HINTS:
+            if keyword in hint_lower:
+                return category
+        return ""
+
+    def _get_preferred_actions(self) -> List[ActionType]:
+        """Return action types ordered by task-based preference, filtered by avoidance."""
+        if self._task_category and self._task_category in _TASK_STRATEGY:
+            preferred = list(_TASK_STRATEGY[self._task_category])
+        else:
+            preferred = [ActionType.FIX_BUG, ActionType.FLAG_ISSUE, ActionType.OPTIMIZE_CODE]
+
+        # All action types as fallback
+        all_types = [ActionType.FIX_BUG, ActionType.FLAG_ISSUE,
+                     ActionType.OPTIMIZE_CODE, ActionType.LEAVE_AS_IS]
+
+        # Filter out avoided actions (but keep alternatives)
+        filtered = [a for a in preferred if a.value not in self._avoid_actions]
+        if not filtered:
+            # Fallback: include all non-avoided actions
+            filtered = [a for a in all_types if a.value not in self._avoid_actions]
+        if not filtered:
+            # Ultimate fallback: use all actions
+            filtered = all_types
+
+        return filtered
+
+    def _compute_confidence(self) -> float:
+        """Compute confidence based on recent success rate."""
+        if not self._step_history:
+            return 0.75  # Initial moderate confidence
+
+        recent = self._step_history[-3:]  # Last 3 steps
+        positive = sum(1 for s in recent if s["reward"] > 0)
+        rate = positive / len(recent)
+
+        # Map success rate to confidence: [0.55, 0.85]
+        return round(0.55 + 0.30 * rate, 2)
+
+    def decide(self, obs: Observation) -> Action:
+        # Infer task category on first step
+        if not self._task_category:
+            self._task_category = self._infer_category(obs.issue_type)
+
+        # Anti-repetition: if same action repeated AND last reward negative → force switch
+        hint = obs.issue_type.lower()
+        preferred = self._get_preferred_actions()
+
+        # If repeating a failed action, remove it from consideration
+        if (self._last_action and self._last_reward < 0
+                and preferred[0].value == self._last_action):
+            alternatives = [a for a in preferred if a.value != self._last_action]
+            if alternatives:
+                preferred = alternatives
+
+        # Use Safe agent's keyword matching as the base intelligence
+        chosen_type = None
+        for keyword, action_type in _SAFE_HINTS:
+            if keyword in hint:
+                if action_type in preferred:
+                    chosen_type = action_type
+                    break
+                # If matched keyword's action is avoided, use first preferred
+                chosen_type = preferred[0]
+                break
+
+        if chosen_type is None:
+            chosen_type = preferred[0] if preferred else ActionType.LEAVE_AS_IS
+
+        confidence = self._compute_confidence()
+
+        # Build contextual explanation
+        explanation = self._build_explanation(chosen_type, hint)
+
+        return Action(
+            action_type=chosen_type,
+            explanation=explanation,
+            confidence=confidence,
+        )
+
+    def _build_explanation(self, action_type: ActionType, hint: str) -> str:
+        """Generate specific explanation tied to the action and context."""
+        explanations = {
+            ActionType.FIX_BUG: {
+                "loop": "Fixing incorrect loop bounds causing off-by-one or redundant iterations",
+                "parse": "Fixing parsing logic that fails on malformed input structures",
+                "crash": "Fixing unhandled edge case that causes runtime crash",
+                "return": "Fixing incorrect return path that produces wrong output type",
+                "cast": "Fixing unsafe type cast that fails on non-numeric input",
+                "unbound": "Fixing unbound variable reference on incomplete code path",
+                "default": "Fixing identified logic defect based on observation analysis",
+            },
+            ActionType.FLAG_ISSUE: {
+                "sensitive": "Flagging sensitive operation without proper input validation",
+                "sanitiz": "Flagging unsanitized input used in privileged operation",
+                "predictable": "Flagging predictable token generation as security vulnerability",
+                "email": "Flagging email/contact field requiring validation before use",
+                "resource": "Flagging resource that may leak without proper cleanup",
+                "default": "Flagging potential security or resource concern for review",
+            },
+            ActionType.OPTIMIZE_CODE: {
+                "o(n": "Optimizing quadratic algorithm with hash-based lookup for O(n)",
+                "concatenat": "Replacing string concatenation loop with join for efficiency",
+                "sort": "Optimizing sort by using more efficient comparison strategy",
+                "scale": "Refactoring to improve scalability under high load",
+                "default": "Applying performance optimization based on detected inefficiency",
+            },
+            ActionType.LEAVE_AS_IS: {
+                "default": "No further issues identified — all detected problems addressed",
+            },
+        }
+
+        type_map = explanations.get(action_type, {"default": "Taking action based on analysis"})
+        for keyword, explanation in type_map.items():
+            if keyword != "default" and keyword in hint:
+                return f"Adaptive: {explanation}"
+        return f"Adaptive: {type_map['default']}"
+
+    def run_task(self, env: CodeReviewEnv, task_id: str) -> Dict[str, Any]:
+        """
+        Run a full episode with reward-based adaptation.
+
+        Overrides base run_task to inject the observe→act→reward→adapt loop.
+        """
+        self.reset_memory()
+        obs = env.reset(task_id)
+        actions_taken: List[str] = []
+        confidence_scores: List[float] = []
+
+        while True:
+            action = self.decide(obs)
+            actions_taken.append(action.action_type.value)
+            confidence_scores.append(action.confidence)
+
+            result = env.step(action)
+            obs = result.observation
+
+            # RL adaptation step: update memory with reward signal
+            self.update(action.action_type.value, result.reward)
+
+            if result.done:
+                break
+
+        grade = env.grade()
+        state = env.state()
+
+        return {
+            "agent": self.name,
+            "task_id": task_id,
+            "steps": grade["steps_used"],
+            "total_reward": round(state.total_reward, 4),
+            "score": grade["score"],
+            "grade": grade,
+            "actions": actions_taken,
+            "confidence_scores": confidence_scores,
+            "resolved_issues": len(state.resolved_issues),
+            "total_issues": grade["total_issues"],
+            "unresolved_issues": list(state.remaining_issues),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Registry
 # ══════════════════════════════════════════════════════════════════════════════
 
-ALL_AGENTS = [BaselineAgent, AggressiveAgent, SafeAgent]
+ALL_AGENTS = [BaselineAgent, AggressiveAgent, SafeAgent, AdaptiveAgent]
 
 def get_all_agents() -> List[Agent]:
     """Instantiate and return all registered agents."""
     return [cls() for cls in ALL_AGENTS]
+

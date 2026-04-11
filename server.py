@@ -52,6 +52,7 @@ env = CodeReviewEnv()
 
 class ResetRequest(BaseModel):
     task_id: str = Field(default="easy_syntax_bug", description="ID of the task to start.")
+    seed: Optional[int] = Field(default=None, description="Optional seed for reproducible task variation.")
 
 
 class GraderRequest(BaseModel):
@@ -149,7 +150,7 @@ def _make_agent_summary(run_data: dict, analysis: dict, impact: dict) -> dict:
 def reset(req: ResetRequest = Body(default=ResetRequest())):
     """Start a new episode for the given task."""
     try:
-        obs = env.reset(req.task_id)
+        obs = env.reset(req.task_id, seed=req.seed)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return obs

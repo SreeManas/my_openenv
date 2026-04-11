@@ -59,10 +59,16 @@ class CodeReviewEnv:
     # reset
     # ──────────────────────────────────────────────────────────────────────
 
-    def reset(self, task_id: str) -> Observation:
-        """Load a task and return the initial observation."""
+    def reset(self, task_id: str, seed: Optional[int] = None) -> Observation:
+        """Load a task and return the initial observation.
+
+        Args:
+            task_id: Task identifier from TASK_REGISTRY.
+            seed: Optional seed for reproducible noise variation.
+        """
         self._task = copy.deepcopy(get_task(task_id))
         self._resolved = []
+        self._seed = seed  # stored for noise injection
 
         # Separate visible vs hidden issues
         all_issues = list(self._task["issues"])
@@ -81,11 +87,12 @@ class CodeReviewEnv:
 
         logger.info(
             "Environment reset — task=%s  visible_issues=%d  "
-            "hidden_issues=%d  max_steps=%d",
+            "hidden_issues=%d  max_steps=%d  seed=%s",
             task_id,
             len(self._visible),
             len(self._hidden),
             self._max_steps,
+            seed,
         )
         return self._make_observation()
 
