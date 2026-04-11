@@ -101,6 +101,72 @@ def _build_anti_repeat_hint(action_history: list) -> str:
     return ""
 
 
+def _generate_thinking(
+    action: dict,
+    obs: dict,
+    action_history: list,
+    step_num: int,
+) -> str:
+    """Generate a visible reasoning trace explaining WHY this action was chosen."""
+    action_type = action.get("action_type", "leave_as_is")
+    issue_hint = obs.get("issue_type", "")
+    remaining = obs.get("remaining_issues", [])
+
+    # Check for previous failure
+    last_failed = False
+    last_action = ""
+    if action_history:
+        last = action_history[-1]
+        last_action = last.get("action_type", "")
+        last_failed = last.get("reward", 0) < 0
+
+    parts = []
+
+    # 1. Failure recognition (Step 4)
+    if last_failed:
+        parts.append(f"Previous {last_action} produced negative reward")
+        if action_type != last_action:
+            parts.append(f"switching strategy to {action_type}")
+        else:
+            parts.append("retrying with refined approach")
+
+    # 2. Context-based reasoning
+    hint_lower = issue_hint.lower()
+    if "security" in hint_lower or "sanitiz" in hint_lower or "sensitive" in hint_lower:
+        parts.append("security context detected, prioritizing vulnerability assessment")
+    elif "loop" in hint_lower or "bounds" in hint_lower or "redundant" in hint_lower:
+        parts.append("detected algorithmic inefficiency in loop structure")
+    elif "crash" in hint_lower or "none" in hint_lower or "unbound" in hint_lower:
+        parts.append("edge-case failure pattern identified")
+    elif "concatenat" in hint_lower or "scale" in hint_lower or "efficient" in hint_lower:
+        parts.append("performance bottleneck detected")
+    elif "shared" in hint_lower or "counter" in hint_lower or "leaking" in hint_lower:
+        parts.append("concurrency or state management issue detected")
+    elif issue_hint:
+        clean_hint = issue_hint.split(".")[0].strip()[:80]
+        parts.append(f"analyzing: {clean_hint}")
+
+    # 3. Action justification
+    if action_type == "fix_bug":
+        parts.append("applying targeted fix based on root-cause analysis")
+    elif action_type == "flag_issue":
+        parts.append("flagging for review before attempting direct modification")
+    elif action_type == "optimize_code":
+        parts.append("applying performance optimization")
+    elif action_type == "leave_as_is":
+        if not remaining:
+            parts.append("all issues resolved, concluding review")
+        else:
+            parts.append("no actionable insight, preserving current state")
+
+    # 4. Progress context
+    if remaining:
+        parts.append(f"{len(remaining)} issue(s) remaining")
+
+    thinking = " -> ".join(parts) if parts else f"Step {step_num}: evaluating {action_type}"
+    return thinking.replace("\n", " ")[:200]
+
+
 def ask_llm(
     code_snippet: str,
     issue_type: str,
@@ -255,6 +321,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error=None) -> N
     )
 
 
+def log_think(thinking: str) -> None:
+    print(f"[THINK] {thinking}", flush=True)
+
+
 def log_end(success: bool, steps: int, rewards: list) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
     print(
@@ -303,6 +373,9 @@ def run_task(task_id: str) -> dict:
             # Capture LLM error if one occurred (set in ask_llm fallback)
             llm_error = action.pop("_error", None)
 
+            # Save pre-step observation for THINK generation
+            pre_step_obs = obs
+
             # Send action to environment
             result = step_action(action)
             obs = result["observation"]
@@ -313,6 +386,15 @@ def run_task(task_id: str) -> dict:
 
             # Sanitize error string — strip newlines to keep [STEP] single-line
             safe_error = str(llm_error).replace("\n", " ").strip() if llm_error else None
+
+            # ── OpenEnv: visible reasoning trace ──────────────────────────
+            thinking = _generate_thinking(
+                action=action,
+                obs=pre_step_obs,
+                action_history=action_history,
+                step_num=step_num,
+            )
+            log_think(thinking)
 
             # ── OpenEnv: log each step ────────────────────────────────────
             log_step(

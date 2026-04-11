@@ -58,7 +58,8 @@ EASY_TASK: Dict[str, Any] = {
     "difficulty": "easy",
     "context": (
         "This Python function checks whether a number is even. "
-        "It was written by a junior developer and may contain simple mistakes."
+        "A CI pipeline failure flagged it during a regression test run — "
+        "the module fails to import, blocking downstream builds."
     ),
     "issues": [
         {

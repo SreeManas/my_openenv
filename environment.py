@@ -378,10 +378,23 @@ class CodeReviewEnv:
             issue_type = "No remaining issues detected."
             noise_applied = False
 
+        # Build dynamic context that evolves as issues are resolved
+        base_context = self._task["context"]
+        if self._resolved:
+            resolved_count = len(self._resolved)
+            remaining_count = len(self._remaining)
+            context = (
+                f"{base_context} "
+                f"[Progress: {resolved_count} issue(s) resolved, "
+                f"{remaining_count} remaining]"
+            )
+        else:
+            context = base_context
+
         return Observation(
             code_snippet=code,
             issue_type=issue_type,
-            context=self._task["context"],
+            context=context,
             task_id=self._task["task_id"],
             step_number=self._step_count,
             remaining_issues=[i["id"] for i in self._remaining],

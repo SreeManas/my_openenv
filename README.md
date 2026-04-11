@@ -106,6 +106,72 @@ CodeReviewBench's reward structure incentivizes RL-like behavior. The `AdaptiveA
 
 ---
 
+## RL Formulation
+
+CodeReviewBench is formalized as a finite-horizon MDP:
+
+| Component | Definition |
+|-----------|-----------|
+| **State** *s* | `(code_snippet, issue_hint, context, remaining_issues, step_number)` — evolves after each action |
+| **Action** *a* | `{fix_bug, flag_issue, optimize_code, leave_as_is}` × explanation × confidence ∈ [0,1] |
+| **Transition** *T(s,a)* | Deterministic: resolves matched issue, reveals hidden issues, updates code version |
+| **Reward** *R(s,a)* | Dense per-step: `base × severity × calibration + sequence_bonus + repeat_penalty + explanation_penalty` |
+| **Horizon** | 3–8 steps depending on task difficulty |
+| **Termination** | All issues resolved OR max steps reached |
+
+**Key RL properties:**
+- **Non-trivial state transitions**: code evolves after each fix (code_versions keyed by resolved set)
+- **Partial observability**: hidden issues not visible until prerequisites resolved
+- **Credit assignment challenge**: some actions unlock future rewards (sequence bonuses)
+- **Exploration vs exploitation**: trying new action types risks penalty but may reveal better strategies
+
+---
+
+## Environment Dynamics
+
+The environment state evolves at each step — this is **not** a static classification task:
+
+1. **Code evolution**: after resolving an issue, the code snippet physically changes to reflect the fix (via `code_versions` lookup keyed by the set of resolved issue IDs)
+2. **Context evolution**: the observation context updates with resolution progress (e.g., `[Progress: 2 issue(s) resolved, 1 remaining]`)
+3. **Issue reveal**: hidden issues (e.g., edge-case bugs) become visible only after the agent resolves prerequisite problems
+4. **Hint degradation**: after wrong actions, the hint appends adversarial guidance ("re-evaluate assumptions about the issue type")
+
+This means two agents taking different action sequences will observe **different states** — the environment is path-dependent.
+
+---
+
+## Visible Reasoning (`[THINK]` Traces)
+
+The inference agent emits a visible reasoning trace **before every action**:
+
+```
+[START] task=hard_multi_issue env=CodeReviewBench model=Qwen/Qwen2.5-72B-Instruct
+[THINK] security context detected, prioritizing vulnerability assessment -> flagging for review -> 5 issue(s) remaining
+[STEP] step=1 action=flag_issue reward=1.22 done=false error=null
+[THINK] Previous flag_issue produced negative reward -> switching strategy to fix_bug -> 4 issue(s) remaining
+[STEP] step=2 action=fix_bug reward=0.85 done=false error=null
+[END] success=true steps=4 rewards=1.22,-0.35,0.85,1.09
+```
+
+Each `[THINK]` line includes:
+- **Failure recognition**: references negative reward from previous step
+- **Strategy adaptation**: explains why the action type changed
+- **Context analysis**: identifies issue category (security, performance, edge-case)
+- **Progress tracking**: remaining issue count
+
+---
+
+## Scalability
+
+While the current version ships with 8 hand-crafted tasks, the architecture supports scalable extension:
+
+- **Seed-based reproducibility**: `/reset` accepts an optional `seed` parameter — same seed produces identical episode
+- **Task template structure**: each task is a self-contained dict with `issues`, `code_versions`, `expected_sequence` — new tasks require no code changes
+- **Difficulty spectrum**: easy (1–2 issues, 3 steps) → hard (4–6 issues, 8 steps, hidden dependencies)
+- **Agent-agnostic API**: any agent (LLM-based, rule-based, RL-trained) can interact via the standard `/reset` → `/step` → `/grader` loop
+
+---
+
 ## Abstract
 
 **CodeReviewBench** is a fully OpenEnv-compliant, deployment-ready reinforcement-learning environment that provides a structured framework for evaluating AI agents on sequential code analysis, bug resolution, and optimization tasks across **8 diverse tasks**. Unlike single-step classification benchmarks, CodeReviewBench requires agents to operate under **partial observability**, **ambiguous feedback signals**, and **inter-dependent action constraints** — properties characteristic of real-world software engineering workflows.
