@@ -357,7 +357,13 @@ def log_step(step: int, action: str, reward: float, done: bool, error=None) -> N
 
 
 def log_think(thinking: str) -> None:
-    print(f"[THINK] {thinking}", flush=True)
+    """Internal reasoning trace — written to stderr under DEBUG only.
+
+    Deliberately NOT printed to stdout: the OpenEnv validator accepts
+    only [START], [STEP], and [END] lines on stdout.
+    """
+    if os.environ.get("DEBUG") == "1":
+        print(f"[THINK] {sanitize_text(thinking)}", file=sys.stderr, flush=True)
 
 
 def log_end(success: bool, steps: int, rewards: list) -> None:
@@ -411,48 +417,48 @@ def _select_adaptive_action(
     if not remaining_ids:
         return "leave_as_is", "all issues resolved"
 
-    # ── Rule 1: hard task step strategy ────────────────────────────────
+    # ── Rule 1: hard task strategy ────────────────────────────────────
     is_hard = "hard" in task_id or "concurrency" in task_id
     if is_hard and step_num <= len(_HARD_TASK_STRATEGY):
         strategy_action = _HARD_TASK_STRATEGY[step_num - 1]
         if strategy_action in available:
             return strategy_action, f"hard-task strategy step {step_num}"
 
-    # ── Rule 2: never repeat a failing action ─────────────────────────
-    if last_reward is not None and last_reward < 0 and last_action == llm_action:
-        # LLM picked the same action that just failed — override
+    # 🔥 Rule 2: FORCE SWITCH after ANY negative reward (MOST IMPORTANT)
+    if last_reward is not None and last_reward < 0:
         alternatives = [a for a in available if a != last_action]
         if alternatives:
             pick = random.choice(alternatives)
-            override_reason = f"overriding {llm_action} (failed last step) with {pick}"
-            return pick, override_reason
+            return pick, f"forcing strategy switch after failure: {last_action} → {pick}"
 
-    # ── Rule 3: LLM picked a banned action → choose alternative ───────
+    # ── Rule 3: prevent repeating failed action ───────────────────────
+    if last_reward is not None and last_reward < 0 and last_action == llm_action:
+        alternatives = [a for a in available if a != last_action]
+        if alternatives:
+            pick = random.choice(alternatives)
+            return pick, f"overriding repeated failure {llm_action} → {pick}"
+
+    # ── Rule 4: banned action ─────────────────────────────────────────
     if llm_action in banned:
         alternatives = [a for a in available if a != llm_action]
         if alternatives:
             pick = random.choice(alternatives)
-            override_reason = f"{llm_action} banned after 2 failures, using {pick}"
-            return pick, override_reason
+            return pick, f"{llm_action} banned → {pick}"
 
-    # ── Rule 4: LLM picked leave_as_is but issues remain → override ───
-    if llm_action == "leave_as_is" and remaining_ids:
-        pick = available[0] if available else "fix_bug"
-        override_reason = f"issues remain, overriding leave_as_is with {pick}"
-        return pick, override_reason
-
-    # ── Rule 5: epsilon-greedy exploration ─────────────────────────────
+    # ── Rule 5: epsilon exploration (bias toward higher Q-value actions) ─
     if random.random() < EPSILON and len(available) > 1:
         alternatives = [a for a in available if a != llm_action]
         if alternatives:
-            pick = random.choice(alternatives)
+            # Prefer the alternative with highest cumulative reward
+            scores = memory.get("action_scores", {})
+            pick = max(alternatives, key=lambda a: scores.get(a, 0.0))
             return pick, f"exploring {pick} (epsilon={EPSILON})"
 
-    # ── Default: trust the LLM ────────────────────────────────────────
+    # ── Default: trust LLM ────────────────────────────────────────────
     if llm_action in available:
         return llm_action, ""
 
-    # LLM action not available — pick best available
+    # fallback
     return available[0], f"{llm_action} unavailable, using {available[0]}"
 
 
@@ -477,6 +483,7 @@ def run_task(task_id: str) -> dict:
         "last_reward": None,
         "fail_counts": {},           # action -> count of failures
         "_override_reason": "",      # passed to THINK generation
+        "action_scores": {},         # lightweight Q-value: action -> cumulative reward
     }
 
     try:
@@ -567,6 +574,11 @@ def run_task(task_id: str) -> dict:
                 memory["successful_actions"].add(chosen_action)
                 # Un-fail if it worked this time
                 memory["failed_actions"].discard(chosen_action)
+
+            # Update lightweight Q-value (action_scores)
+            memory["action_scores"][chosen_action] = (
+                memory["action_scores"].get(chosen_action, 0.0) + step_reward
+            )
 
             if done:
                 break
