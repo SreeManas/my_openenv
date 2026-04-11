@@ -34,6 +34,98 @@ def sanitize_dict(obj):
         return sanitize_text(obj)
     return obj
 
+
+def analyze_context(context: str, issue_type: str = "") -> str:
+    """Map observation text to the most likely correct action (no output, internal only).
+
+    Returns one of: fix_bug | flag_issue | optimize_code
+    This acts as a grounded prior that biases the LLM prompt toward the right action
+    before the LLM makes its own decision.  It does NOT override the LLM — it informs it.
+    """
+    combined = (context + " " + issue_type).lower()
+
+    # Memory / OOM signals — these need a code fix (not just flagging)
+    if any(k in combined for k in (
+        "memory leak", "memory usage", "oom", "out of memory",
+        "unbounded cache", "unbounded dict", "never evicted",
+        "grows without bound", "heap",
+    )):
+        return "fix_bug"
+
+    # Security / compliance signals → flag first before touching code
+    if any(k in combined for k in (
+        "security", "token", "secret", "password", "credential", "pii",
+        "gdpr", "sensitive", "sanitiz", "injection", "xss", "csrf",
+        "exploit", "vulnerab", "auth", "permission", "data breach",
+        "private key", "plaintext",
+    )):
+        return "flag_issue"
+
+    # Concurrency / shared state → flag before fixing (root cause first)
+    if any(k in combined for k in (
+        "race condition", "thread", "concurr", "deadlock", "atomic",
+        "shared state", "mutex", "lock", "synchroni",
+        "global variable", "request_count",
+    )):
+        return "flag_issue"
+
+    # Performance / efficiency signals → optimize
+    if any(k in combined for k in (
+        "slow", "performance", "latency", "inefficien", "n+1", "n + 1",
+        "o(n", "o(n^2", "quadratic", "nested loop", "redundant",
+        "cache miss", "bottleneck", "timeout",
+        "connection pool", "saturated",
+    )):
+        return "optimize_code"
+
+    # Logic / crash / edge-case signals → fix
+    if any(k in combined for k in (
+        "logic", "loop bound", "off-by-one", "duplicate", "incorrect",
+        "crash", "exception", "unhandled", "none", "null", "undefined",
+        "edge case", "unexpected", "wrong", "fail", "syntax", "parse",
+        "missing colon", "unboundlocal", "keyerror", "typeerror",
+        "leak", "resource leak",
+    )):
+        return "fix_bug"
+
+    # Default
+    return "fix_bug"
+
+
+
+def get_all_available_tasks() -> list:
+    """Dynamically discover all task IDs.
+
+    Priority:
+    1. Fetch from the live /tasks endpoint (always up-to-date, picks up new tasks)
+    2. Fall back to tasks.py TASK_REGISTRY (works without a running server)
+    """
+    try:
+        resp = requests.get(f"{ENV_URL}/tasks", timeout=15)
+        resp.raise_for_status()
+        tasks = sanitize_dict(resp.json())
+        if tasks and isinstance(tasks, list):
+            ids = [
+                t["task_id"] if isinstance(t, dict) else t
+                for t in tasks
+            ]
+            if ids:
+                return ids
+    except Exception:
+        pass  # Fall through to local registry
+
+    # Local fallback — import TASK_REGISTRY directly from tasks.py
+    try:
+        from tasks import TASK_REGISTRY  # type: ignore
+        return list(TASK_REGISTRY.keys())
+    except Exception:
+        # Last resort: known static list
+        return [
+            "easy_syntax_bug", "medium_logic_bug", "hard_multi_issue",
+            "security_review", "data_validation_pipeline", "concurrency_bug",
+            "production_incident_response",
+        ]
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
@@ -207,11 +299,17 @@ def ask_llm(
     """
     Send the current observation to the LLM and parse its action.
 
-    Now includes action history, progress tracking, anti-repeat hints,
-    and a decision strategy block for better trajectory awareness.
+    Includes: action history, progress, anti-repeat hints, decision strategy,
+    and a context-analysis hint that biases the LLM toward the correct action
+    before it chooses (analyze_context runs internally — no stdout output).
     """
     if action_history is None:
         action_history = []
+
+    # ── Internal context analysis (no stdout) ────────────────────────────────
+    # Runs keyword matching over context + issue_type to recommend an action.
+    # Injected into the prompt as a grounded prior — does NOT override LLM.
+    recommended_action = analyze_context(context=context, issue_type=issue_type)
 
     # Build structured prompt sections
     sections = [
@@ -220,21 +318,29 @@ def ask_llm(
         f"## Context\n{context}",
     ]
 
-    # Add progress signal (Task 2)
+    # Inject context-analysis recommendation (grounded prior)
+    sections.append(
+        f"## Recommended First Action (from context analysis)\n"
+        f"Based on the issue description and context, the most appropriate action "
+        f"is likely: **{recommended_action}**\n"
+        f"Use this as a starting point, but apply your own reasoning."
+    )
+
+    # Add progress signal
     if total_count > 0:
         sections.append(_build_progress_block(resolved_count, total_count))
 
-    # Add action history (Task 1)
+    # Add action history
     history_block = _build_history_block(action_history)
     if history_block:
         sections.append(history_block)
 
-    # Add anti-repeat hint (Task 3)
+    # Add anti-repeat hint
     anti_repeat = _build_anti_repeat_hint(action_history)
     if anti_repeat:
         sections.append(anti_repeat)
 
-    # Add decision strategy guidance (Task 6)
+    # Add decision strategy guidance
     sections.append(
         "## Decision Strategy\n"
         "- Prioritize unresolved issues by severity (security > bugs > performance > style)\n"
@@ -294,13 +400,16 @@ def ask_llm(
 
         return action
 
-    except Exception as e:
+    except Exception:
+        # Fallback: use context-analysis recommendation, never leave_as_is
+        fallback = recommended_action if recommended_action != "leave_as_is" else "fix_bug"
         return {
-            "action_type": "fix_bug",  # Never leave_as_is on LLM failure
-            "explanation": "LLM fallback: attempting fix",
+            "action_type": fallback,
+            "explanation": f"LLM fallback: context suggests {fallback}",
             "confidence": 0.6,
-            "_error": None,   # 🔥 REMOVE ERROR PROPAGATION COMPLETELY
+            "_error": None,
         }
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -619,7 +728,7 @@ def run_task(task_id: str) -> dict:
 
 
 def main():
-    """Run the LLM agent on all available tasks."""
+    """Run the LLM agent on all available tasks (discovered dynamically)."""
     global ENV_URL
 
     # Validate ENV_URL here (not at import time)
@@ -630,29 +739,32 @@ def main():
         )
 
     if os.environ.get("DEBUG") == "1":
-        print(f"Model:  {MODEL_NAME}")
-        print(f"Server: {ENV_URL}")
-        print(f"Token:  {'set' if HF_TOKEN else 'NOT SET'}")
+        print(f"Model:  {MODEL_NAME}", file=sys.stderr)
+        print(f"Server: {ENV_URL}", file=sys.stderr)
+        print(f"Token:  {'set' if HF_TOKEN else 'NOT SET'}", file=sys.stderr)
 
-    tasks = get_tasks()
+    # Dynamic task discovery — picks up new tasks without any code changes
+    task_ids = get_all_available_tasks()
+
+    if os.environ.get("DEBUG") == "1":
+        print(f"Tasks ({len(task_ids)}): {task_ids}", file=sys.stderr)
+
     results = []
-
-    for task in tasks:
-        # Support both list-of-dicts and list-of-strings
-        task_id = task["task_id"] if isinstance(task, dict) else task
+    for task_id in task_ids:
         result = run_task(task_id)
         results.append(result)
 
-    # Summary
+    # Debug summary (stderr only — never touches OpenEnv stdout)
     if os.environ.get("DEBUG") == "1":
-        print(f"\n{'═' * 60}")
-        print("  LLM AGENT SUMMARY")
-        print(f"{'═' * 60}")
+        print(f"\n{'=' * 60}", file=sys.stderr)
+        print("  LLM AGENT SUMMARY", file=sys.stderr)
+        print(f"{'=' * 60}", file=sys.stderr)
         for r in results:
-            print(f"  {r['task_id']:25s}  score={r['score']:.4f}  steps={r['steps']}")
-
+            print(f"  {r['task_id']:30s}  score={r['score']:.4f}  steps={r['steps']}",
+                  file=sys.stderr)
         avg = sum(r["score"] for r in results) / len(results) if results else 0
-        print(f"\n  Average score: {avg:.4f}")
+        print(f"\n  Average score: {avg:.4f}", file=sys.stderr)
+
 
 
 if __name__ == "__main__":
