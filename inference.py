@@ -150,6 +150,7 @@ ENV_URL = os.environ.get("ENV_URL", "http://localhost:7860")
 MAX_STEPS = 8
 MAX_REASON_LEN = 160  # max chars shown for explanation in step logs
 MAX_HISTORY_SHOWN = 5  # max past actions included in prompt
+LLM_TIMEOUT = 60       # seconds before giving up on a slow LLM response
 
 
 SYSTEM_PROMPT = """You are an expert AI code reviewer performing a multi-step code review. Your goal is to identify and resolve ALL issues in the code efficiently.
@@ -379,6 +380,7 @@ def ask_llm(
             ],
             temperature=0.0,
             max_tokens=256,
+            timeout=LLM_TIMEOUT,
         )
         raw = response.choices[0].message.content.strip()
 
