@@ -495,10 +495,16 @@ def log_think(thinking: str) -> None:
         print(f"[THINK] {sanitize_text(thinking)}", file=sys.stderr, flush=True)
 
 
-def log_end(success: bool, steps: int, rewards: list) -> None:
+def log_end(success: bool, steps: int, rewards: list, score: float = 0.5) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
+    # Hard clamp score to strict (0, 1)
+    if score >= 1.0:
+        score = 0.99
+    elif score <= 0.0:
+        score = 0.01
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.4f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -780,6 +786,7 @@ def run_task(task_id: str) -> dict:
         success=safe_score > 0.5,
         steps=steps_used,
         rewards=step_rewards,
+        score=safe_score,
     )
 
     return {
