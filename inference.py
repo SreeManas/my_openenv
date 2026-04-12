@@ -715,8 +715,11 @@ def run_task(task_id: str) -> dict:
 
         # Grade the trajectory
         score = grade()
-        final_score = score.get("score", 0.0)
+        final_score = min(0.999, max(0.001, score.get("score", 0.001)))
         steps_used = score.get("steps_used", 0)
+
+        # Runtime safety net — catch boundary violations immediately
+        assert 0 < final_score < 1, f"INVALID SCORE: {final_score}"
 
         # ── RL feedback: blend episode score into Q-values ────────────────
         # Closes the loop: poor episode scores reduce Q-value of actions taken
@@ -750,6 +753,7 @@ def run_task(task_id: str) -> dict:
         steps_used = step_num
 
     # ── OpenEnv: announce end of episode ─────────────────────────────────
+    # final_score is already clamped (0.001, 0.999) above; clamp again for safety
     safe_score = min(0.999, max(0.001, final_score))
     log_end(
         success=safe_score > 0.5,
@@ -759,7 +763,7 @@ def run_task(task_id: str) -> dict:
 
     return {
         "task_id": task_id,
-        "score": final_score,
+        "score": safe_score,
         "steps": steps_used,
         "total_reward": round(total_reward, 4),
         "grade": score,

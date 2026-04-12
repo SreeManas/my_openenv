@@ -8,6 +8,19 @@ Scores are strictly within (0, 1) — never 0.0 or 1.0.
 from typing import Dict, Any, List
 
 
+def _safe_score(score: float) -> float:
+    """Enforce strict (0, 1) AFTER rounding.
+
+    This is the SINGLE gatekeeper for all score values.
+    No score leaves the grader without passing through this.
+    """
+    if score >= 0.999:
+        return 0.999
+    if score <= 0.001:
+        return 0.001
+    return score
+
+
 def grade_trajectory(
     task: Dict[str, Any],
     action_history: List[Dict[str, Any]],
@@ -19,18 +32,18 @@ def grade_trajectory(
 
     # ── 1. Completion (0.30)
     completion_ratio = (
-        len(resolved_issues) / total_issues if total_issues else 0.0
+        len(resolved_issues) / total_issues if total_issues else 0.001
     )
     completion_score = completion_ratio
 
     # ── 2. Efficiency (0.15)
     steps_used = len(action_history)
     if steps_used == 0:
-        efficiency_score = 0.0
+        efficiency_score = 0.001
     else:
         ideal_steps = total_issues
         efficiency_score = max(
-            0.0, 1.0 - (steps_used - ideal_steps) / max_steps
+            0.001, 1.0 - (steps_used - ideal_steps) / max_steps
         )
 
     # ── 3. Safety (0.20)
@@ -41,7 +54,7 @@ def grade_trajectory(
         1 for a in action_history
         if -0.5 < a.get("reward", 0) < 0
     )
-    safety_score = max(0.0, 1.0 - 0.3 * harmful_count - 0.1 * wrong_count)
+    safety_score = max(0.001, 1.0 - 0.3 * harmful_count - 0.1 * wrong_count)
 
     # ── 4. Sequence (0.20)
     expected_seq = task.get("expected_sequence", [])
@@ -62,17 +75,21 @@ def grade_trajectory(
         + 0.15 * calibration_score
     )
 
-    # 🔥 STRICT CLAMP (CRITICAL FIX)
-    final_score = min(0.999, max(0.001, raw_score))
+    # Apply _safe_score AFTER rounding to every single metric
+    final_score = _safe_score(round(raw_score, 4))
+    completion_score = _safe_score(round(completion_score, 4))
+    efficiency_score = _safe_score(round(efficiency_score, 4))
+    safety_score = _safe_score(round(safety_score, 4))
+    seq_score = _safe_score(round(seq_score, 4))
+    calibration_score = _safe_score(round(calibration_score, 4))
 
     return {
-        # 🔥 DOUBLE SAFETY (prevents 1.000 after rounding)
-        "score": min(0.999, round(min(0.999, max(0.001, final_score)), 4)),
-        "completion": round(completion_score, 4),
-        "efficiency": round(efficiency_score, 4),
-        "safety": round(safety_score, 4),
-        "sequence": round(seq_score, 4),
-        "calibration": round(calibration_score, 4),
+        "score": final_score,
+        "completion": completion_score,
+        "efficiency": efficiency_score,
+        "safety": safety_score,
+        "sequence": seq_score,
+        "calibration": calibration_score,
         "steps_used": steps_used,
         "issues_resolved": len(resolved_issues),
         "total_issues": total_issues,
@@ -83,7 +100,7 @@ def grade_trajectory(
 
 def _lcs_ratio(expected: List[str], actual: List[str]) -> float:
     if not expected:
-        return 1.0
+        return 0.999  # No sequence expected → near-perfect
 
     n, m = len(expected), len(actual)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
@@ -95,12 +112,14 @@ def _lcs_ratio(expected: List[str], actual: List[str]) -> float:
             else:
                 dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
 
-    return dp[n][m] / n
+    ratio = dp[n][m] / n
+    # Clamp: ratio can be exactly 0.0 (no match) or 1.0 (perfect match)
+    return _safe_score(ratio)
 
 
 def _calibration_score(action_history: List[Dict[str, Any]]) -> float:
     if not action_history:
-        return 1.0
+        return 0.999  # No history → near-perfect calibration
 
     errors = []
     for action in action_history:
@@ -113,4 +132,6 @@ def _calibration_score(action_history: List[Dict[str, Any]]) -> float:
             errors.append(conf ** 2)
 
     mean_error = sum(errors) / len(errors)
-    return max(0.0, 1.0 - mean_error)
+    result = 1.0 - mean_error
+    # Clamp: result can be exactly 0.0 (all wrong) or 1.0 (perfect calibration)
+    return _safe_score(result)
