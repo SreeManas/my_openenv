@@ -470,10 +470,17 @@ def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-def log_step(step: int, action: str, reward: float, done: bool, error=None) -> None:
+def log_step(step: int, action: str, reward: float, done: bool, error=None, score: float = 0.5) -> None:
     error_val = sanitize_text(error) if error else "null"  # sanitize error string
+    # Hard clamp score to strict (0, 1)
+    if score >= 1.0:
+        score = 0.99
+    elif score <= 0.0:
+        score = 0.01
     print(
-        f"[STEP] step={step} action={sanitize_text(action)} reward={reward:.2f} done={str(done).lower()} error={error_val}",
+        f"[STEP] step={step} action={sanitize_text(action)} "
+        f"reward={reward:.2f} score={score:.4f} "
+        f"done={str(done).lower()} error={error_val}",
         flush=True,
     )
 
@@ -677,6 +684,16 @@ def run_task(task_id: str) -> dict:
             )
             log_think(sanitize_text(thinking))
 
+            # ── Compute step score (running estimate) ─────────────────
+            try:
+                step_score = float(total_reward / step_num) * 0.5 + 0.5
+            except Exception:
+                step_score = 0.5
+            if step_score >= 1.0:
+                step_score = 0.99
+            elif step_score <= 0.0:
+                step_score = 0.01
+
             # ── OpenEnv: log each step ────────────────────────────────
             log_step(
                 step=step_num,
@@ -684,6 +701,7 @@ def run_task(task_id: str) -> dict:
                 reward=step_reward,
                 done=done,
                 error=None,
+                score=step_score,
             )
 
             # ── Update episode memory ─────────────────────────────────
@@ -750,6 +768,7 @@ def run_task(task_id: str) -> dict:
             reward=0.0,
             done=True,
             error=safe_exc,
+            score=0.01,
         )
         score = {}
         steps_used = step_num
