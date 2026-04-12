@@ -717,7 +717,7 @@ def run_task(task_id: str) -> dict:
 
         # Grade the trajectory
         score = grade()
-        final_score = min(0.999, max(0.001, score.get("score", 0.001)))
+        final_score = min(0.99, max(0.01, score.get("score", 0.01)))
         steps_used = score.get("steps_used", 0)
 
         # Runtime safety net — catch boundary violations immediately
@@ -756,7 +756,7 @@ def run_task(task_id: str) -> dict:
 
     # ── OpenEnv: announce end of episode ─────────────────────────────────
     # final_score is already clamped (0.001, 0.999) above; clamp again for safety
-    safe_score = min(0.999, max(0.001, final_score))
+    safe_score = min(0.99, max(0.01, final_score))
     log_end(
         success=safe_score > 0.5,
         steps=steps_used,

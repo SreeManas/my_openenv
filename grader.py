@@ -4,19 +4,22 @@ Grader for the AI Code Review environment.
 Evaluates an agent's entire trajectory across an episode.
 Scores are strictly within (0, 1) — never 0.0 or 1.0.
 
-Clamping strategy: round FIRST, then clamp.
-This ensures floating-point rounding never produces exact 0.0 or 1.0.
+Strategy: round first, clamp second. The clamp is the final gatekeeper.
 """
 
 from typing import Dict, Any, List
 
-_SCORE_MIN = 0.001
-_SCORE_MAX = 0.999
+_SCORE_MIN = 0.01
+_SCORE_MAX = 0.99
 
 
 def _clamp(value: float) -> float:
     """Clamp into strict open interval (0, 1). Always called AFTER rounding."""
-    return min(_SCORE_MAX, max(_SCORE_MIN, value))
+    if value >= _SCORE_MAX:
+        return _SCORE_MAX
+    if value <= _SCORE_MIN:
+        return _SCORE_MIN
+    return value
 
 
 def grade_trajectory(
@@ -73,15 +76,6 @@ def grade_trajectory(
         + 0.15 * calibration_score
     )
     final_score = _clamp(round(raw_score, 4))
-
-    print("DEBUG SCORE CHECK:", {
-        "final": final_score,
-        "completion": completion_score,
-        "efficiency": efficiency_score,
-        "safety": safety_score,
-        "sequence": seq_score,
-        "calibration": calibration_score,
-    })
 
     return {
         "score": final_score,
